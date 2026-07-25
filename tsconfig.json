@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/geometry" },
+    { "path": "packages/core" },
+    { "path": "packages/viewport" },
+    { "path": "packages/io" },
+    { "path": "packages/sim" },
+    { "path": "packages/react" },
+    { "path": "packages/svelte" }
+  ]
+}

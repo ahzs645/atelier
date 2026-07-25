@@ -1,0 +1,28 @@
+{
+  "name": "@atelier/react",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "types": "./src/index.tsx",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atelier/core": "workspace:*",
+    "@atelier/viewport": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "react": "^19.2.4"
+  }
+}

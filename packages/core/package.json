@@ -1,0 +1,16 @@
+{
+  "name": "@atelier/core",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run"
+  },
+  "dependencies": {"@atelier/geometry":"workspace:*"}
+}
