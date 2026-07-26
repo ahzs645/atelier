@@ -15,8 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@atelier/core": "workspace:*",
-    "@atelier/viewport": "workspace:*"
+    "@atelier/core": "file:../core",
+    "@atelier/viewport": "file:../viewport"
   },
   "peerDependencies": {
     "react": ">=19 <20"

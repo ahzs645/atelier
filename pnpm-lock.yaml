@@ -76,7 +76,7 @@ importers:
   packages/core:
     dependencies:
       '@atelier/geometry':
-        specifier: workspace:*
+        specifier: file:../geometry
         version: link:../geometry
 
   packages/geometry:
@@ -92,10 +92,10 @@ importers:
   packages/io:
     dependencies:
       '@atelier/core':
-        specifier: workspace:*
+        specifier: file:../core
         version: link:../core
       '@atelier/geometry':
-        specifier: workspace:*
+        specifier: file:../geometry
         version: link:../geometry
     devDependencies:
       '@types/three':
@@ -108,10 +108,10 @@ importers:
   packages/react:
     dependencies:
       '@atelier/core':
-        specifier: workspace:*
+        specifier: file:../core
         version: link:../core
       '@atelier/viewport':
-        specifier: workspace:*
+        specifier: file:../viewport
         version: link:../viewport
     devDependencies:
       '@types/react':
@@ -124,10 +124,10 @@ importers:
   packages/sim:
     dependencies:
       '@atelier/core':
-        specifier: workspace:*
+        specifier: file:../core
         version: link:../core
       '@atelier/geometry':
-        specifier: workspace:*
+        specifier: file:../geometry
         version: link:../geometry
     devDependencies:
       '@webgpu/types':
@@ -137,10 +137,10 @@ importers:
   packages/svelte:
     dependencies:
       '@atelier/core':
-        specifier: workspace:*
+        specifier: file:../core
         version: link:../core
       '@atelier/viewport':
-        specifier: workspace:*
+        specifier: file:../viewport
         version: link:../viewport
     devDependencies:
       svelte:
@@ -150,10 +150,10 @@ importers:
   packages/viewport:
     dependencies:
       '@atelier/core':
-        specifier: workspace:*
+        specifier: file:../core
         version: link:../core
       '@atelier/geometry':
-        specifier: workspace:*
+        specifier: file:../geometry
         version: link:../geometry
     devDependencies:
       '@types/three':

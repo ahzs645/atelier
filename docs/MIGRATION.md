@@ -258,7 +258,27 @@ to promote something that is really app-specific.
 if a signature mentions a domain noun (piece, panel, seam, crease, avatar), it does not belong
 in a package.
 
-**R2 — `cdt2d` → `delaunator` changes packager's fold output. [highest risk]**
+**R2 — `cdt2d` → `delaunator` changes packager's fold output. [RESOLVED — see outcome below]**
+
+> **Outcome (measured, not assumed).** The two triangulators **do** disagree, on 2 of the
+> MailerBox fixture's faces (8 and 15): they pick *opposite diagonals of a near-cocircular
+> quad*, which is arbitrary in Delaunay and valid either way. Every divergence is a same-size
+> diagonal swap, never a different constraint count, and total face area is conserved.
+>
+> **The converged fold does not move.** Running the Newton solver over the fixture under both
+> triangulators gives a maximum per-vertex displacement below `1e-3` on a model spanning
+> hundreds of units, with both solves converging to edge error `~5e-8`.
+>
+> Two permanent tests in `packcad/packages/fold-solver/src/` guard this:
+> `triangulationParity.test.ts` (pins *where* they diverge) and `r2FoldOutcome.test.ts` (proves
+> the fold is unaffected). `cdt2d` is retained as a devDependency solely for the comparison.
+>
+> **Testing trap worth remembering:** `vi.spyOn` on an ESM namespace does **not** intercept the
+> solver's import — it silently no-ops, so both runs use delaunator and the test passes for the
+> wrong reason. The mock must go through `vi.mock` + `vi.hoisted`, and the test asserts the
+> mock was actually called.
+
+Original analysis:
 `faceDiagonals()` feeds the isometry bars that keep facets rigid in the Newton solver. A
 different triangulation gives a different constraint set, which can change the converged fold —
 subtly, and possibly only on some inputs.
