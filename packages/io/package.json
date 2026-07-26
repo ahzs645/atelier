@@ -4,7 +4,9 @@
   "type": "module",
   "license": "UNLICENSED",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./browser": "./src/browser/index.ts",
+    "./three": "./src/three/index.ts"
   },
   "types": "./src/index.ts",
   "files": ["src"],

@@ -905,9 +905,13 @@ not worth the coordination cost at two consumers.
 
 Flagged rather than guessed. None block starting Phase 0.
 
-1. **Document Y-axis direction** (D5). Asserted Y-up in world; the doc→world flip must be
-   verified against seamer's `PatternCanvas2D` `toCanvas`/`toPattern` and packager's
-   `flatSceneBounds` before `docToWorld` is written. Cheap to check, expensive to get wrong.
+1. ~~**Document Y-axis direction** (D5).~~ **RESOLVED during implementation.** Document space is
+   mathematical **Y-up, with no inversion in `docToWorld`**. Evidence: seamer's
+   `geometry/arrangement.ts` maps document `(x, y)` straight to world `(x, y)` after the mm→m
+   divide, and `PatternCanvas2D` negates Y *only* when projecting to Y-down canvas pixels.
+   packager's flat projection negates its depth axis to compensate for the top-down camera's
+   screen inversion — that is projection-specific, not a document convention (its folded-3D path
+   uses the positive sign). See `packages/viewport/src/units.ts` and its tests.
 2. **`delaunator` parity for packager's fold facets** (D6). The single highest-risk item;
    see MIGRATION R2 for the mitigation.
 3. **Layers.** seamer has a first-class `Layer` model with style/lock/visibility; packager has
@@ -921,3 +925,11 @@ Flagged rather than guessed. None block starting Phase 0.
    `ViewportCanvas`. Decide with the code in front of you, not now.
 6. **Publishing.** Private registry, GitHub Packages, or git dependency? See MIGRATION §2 —
    affects nothing before Phase 1 ships.
+7. **Ambient occlusion: `GTAOPass` vs `n8ao`. [known deviation]** seamer's polished look comes
+   from the external `n8ao` package (`N8AOPass`). `PostFX` ships three r181's built-in
+   `GTAOPass` instead, to keep the engine dependency-light. **This will change seamer's shading
+   and must be checked against the Phase 0 reference images (risk R5).**
+   `PostFX` currently owns its composer with no injection point, so an app cannot swap the AO
+   pass — if the GTAO look is not acceptable, the fix is an engine change: an
+   `aoPassFactory` option on `ViewportOptions`, or exposing the composer for app-owned passes.
+   Deliberately not built speculatively; decide with the rendered comparison in front of you.
