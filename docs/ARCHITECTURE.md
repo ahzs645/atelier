@@ -585,6 +585,10 @@ export interface DirectionalLightSpec {
   shadowMapSize?: number
 }
 
+export type EnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: string }
+
 export class LightingRig {
   setPreset(preset: LightingPreset): void
   /** Replace direct lights; the rig constructs, owns, and disposes them. */
@@ -601,7 +605,10 @@ export class LightingRig {
         ) => readonly DirectionalLightSpec[]
       },
     intensity?: number
-  ): Promise<void>
+  ): Promise<EnvironmentResult>
+  /** Remove scene.environment and cancel any pending HDRI installation.
+   *  Cached PMREM textures remain cache-owned for later requests. */
+  clearEnvironment(): void
   setEnvironmentIntensity(v: number): void
   setShadows(enabled: boolean): void
   setBackground(color: string | null): void
@@ -610,9 +617,22 @@ export class LightingRig {
 }
 
 // --- post-processing --------------------------------------------------------
+export interface DofFocus {
+  distance: number
+  /** BokehPass aperture uniform. Omit to keep the f-stop-derived aperture. */
+  aperture?: number
+}
+
+export type DofFocusProvider = () => DofFocus | null
+
 export interface PostSettings {
   ao?: { enabled: boolean; intensity?: number; radius?: number; falloff?: number }
-  dof?: { enabled: boolean; fStop?: number }
+  dof?: {
+    enabled: boolean
+    fStop?: number
+    /** Called before each active DOF render; null falls back to orbit-target focus. */
+    focusProvider?: DofFocusProvider
+  }
   smaa?: boolean
 }
 
@@ -981,14 +1001,17 @@ last release returns the viewport to on-demand rendering.
 
 Every class exposes `dispose()`. `Viewport.dispose()` cascades to all subsystems. GPU
 resources have exactly one owner. `Viewport.dispose()` also drops all render leases and cancels
-the scheduled frame. `ResourceScope` covers the bulk cases (D9).
+the scheduled frame. `LightingRig.clearEnvironment()` releases the scene's reference and cancels
+pending installation; its environment cache continues to own reusable PMREM textures until rig
+disposal. `ResourceScope` covers the bulk cases (D9).
 
 ### 5.5 Errors
 
 Engine code throws only on programmer error (unknown command type, unregistered object).
 Recoverable failures return typed results — `CommandResult.error`, `PostFX.setEnabled()`
-returning `false`, `requestDevice()` returning `null` with a reason. No `console.warn` from
-inside a package; surface it through the return value or an `'error'` event.
+returning `false`, `LightingRig.setEnvironment()` returning `EnvironmentResult`, and
+`requestDevice()` returning `null` with a reason. No `console.warn` from inside a package;
+surface it through the return value or an `'error'` event.
 
 ### 5.6 SSR
 

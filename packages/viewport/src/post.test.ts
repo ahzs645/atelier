@@ -13,6 +13,11 @@ const postMocks = vi.hoisted(() => ({
   composerDisposed: vi.fn(),
   gtaoConstructed: vi.fn(),
   addedPasses: [] as unknown[],
+  bokehUniforms: [] as Array<{
+    aperture: { value: number };
+    maxblur: { value: number };
+    focus: { value: number };
+  }>,
   renderTargets: [] as Array<{ samples: number }>,
 }));
 
@@ -95,6 +100,7 @@ vi.mock('three/addons/postprocessing/BokehPass.js', () => ({
       void scene;
       void options;
       this.camera = camera;
+      postMocks.bokehUniforms.push(this.uniforms);
     }
   },
 }));
@@ -123,6 +129,7 @@ describe('PostFX AO injection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     postMocks.addedPasses.length = 0;
+    postMocks.bokehUniforms.length = 0;
     postMocks.renderTargets.length = 0;
   });
 
@@ -225,5 +232,32 @@ describe('PostFX AO injection', () => {
     expect(post.setEnabled(true)).toBe(false);
     expect(post[postFxInternal].render()).toBe(false);
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies focus distance and aperture from the DOF focus provider', () => {
+    const focusProvider = vi.fn(() => ({
+      distance: 2.75,
+      aperture: 0.0075,
+    }));
+    const post = new PostFX(
+      fakeRenderer(),
+      new THREE.Scene(),
+      new THREE.PerspectiveCamera(),
+    );
+
+    expect(post.setEnabled(true)).toBe(true);
+    post.apply({
+      dof: {
+        enabled: true,
+        fStop: 11,
+        focusProvider,
+      },
+    });
+    expect(post[postFxInternal].render()).toBe(true);
+
+    expect(focusProvider).toHaveBeenCalledTimes(1);
+    expect(postMocks.bokehUniforms[0]?.focus.value).toBe(2.75);
+    expect(postMocks.bokehUniforms[0]?.aperture.value).toBe(0.0075);
+    post.dispose();
   });
 });

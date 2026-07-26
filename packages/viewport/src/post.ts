@@ -14,11 +14,24 @@ export interface PostSettings {
     radius?: number;
     falloff?: number;
   };
-  dof?: { enabled: boolean; fStop?: number };
+  dof?: {
+    enabled: boolean;
+    fStop?: number;
+    /** Called before each active DOF render. Return null to use orbit-target focus. */
+    focusProvider?: DofFocusProvider;
+  };
   smaa?: boolean;
 }
 
 export type AoSettings = NonNullable<PostSettings['ao']>;
+
+export interface DofFocus {
+  distance: number;
+  /** BokehPass aperture uniform. Omit to keep the f-stop-derived aperture. */
+  aperture?: number;
+}
+
+export type DofFocusProvider = () => DofFocus | null;
 
 /** Adapter for an app-owned AO implementation inserted into the engine composer. */
 export interface AoPass {
@@ -69,6 +82,9 @@ export class PostFX {
   private forceLowEnd = false;
   private smaaScale = 1;
   private msaaSamples = 0;
+  private dofEnabled = false;
+  private dofAperture = Math.min(0.05, 0.025 / 2.8);
+  private focusProvider: DofFocusProvider | null = null;
   private aoSettings: AoSettings = {
     enabled: true,
   };
@@ -113,12 +129,12 @@ export class PostFX {
       this.aoSettings = { ...settings.ao };
       this.applyAoSettings();
     }
-    if (this.bokehPass && settings.dof) {
-      this.bokehPass.enabled = settings.dof.enabled && !this.forceLowEnd;
+    if (settings.dof) {
+      this.dofEnabled = settings.dof.enabled;
+      this.focusProvider = settings.dof.focusProvider ?? null;
       const fStop = Math.max(0.1, settings.dof.fStop ?? 2.8);
-      const uniforms = this.bokehPass.uniforms as BokehUniforms;
-      if (uniforms.aperture) uniforms.aperture.value = Math.min(0.05, 0.025 / fStop);
-      if (uniforms.maxblur) uniforms.maxblur.value = 0.01;
+      this.dofAperture = Math.min(0.05, 0.025 / fStop);
+      this.applyDofSettings();
     }
     if (this.smaaPass && settings.smaa !== undefined) {
       this.smaaPass.enabled = settings.smaa && !this.forceLowEnd;
@@ -145,7 +161,7 @@ export class PostFX {
       this.resizeAoPass();
     }
     this.applyAoSettings();
-    if (this.bokehPass) this.bokehPass.enabled = this.bokehPass.enabled && !this.forceLowEnd;
+    this.applyDofSettings();
     if (this.smaaPass) this.smaaPass.enabled = this.smaaPass.enabled && !this.forceLowEnd;
     this.invalidate();
   }
@@ -157,12 +173,31 @@ export class PostFX {
     if (this.builtInAoPass) this.builtInAoPass.camera = camera;
     if (this.bokehPass) {
       this.bokehPass.camera = camera;
-      const uniforms = this.bokehPass.uniforms as BokehUniforms;
-      if (uniforms.focus) {
-        const target = this.getFocusTarget();
-        uniforms.focus.value = target
-          ? Math.max(0.001, camera.position.distanceTo(target))
-          : 1;
+      if (this.bokehPass.enabled) {
+        const uniforms = this.bokehPass.uniforms as BokehUniforms;
+        let suppliedFocus: DofFocus | null = null;
+        try {
+          suppliedFocus = this.focusProvider?.() ?? null;
+        } catch {
+          // A failed app provider falls back to the engine's orbit-target policy.
+        }
+        if (uniforms.focus) {
+          const target = this.getFocusTarget();
+          const fallback = target
+            ? Math.max(0.001, camera.position.distanceTo(target))
+            : 1;
+          uniforms.focus.value =
+            suppliedFocus && Number.isFinite(suppliedFocus.distance)
+              ? Math.max(0.001, suppliedFocus.distance)
+              : fallback;
+        }
+        if (uniforms.aperture) {
+          uniforms.aperture.value =
+            suppliedFocus?.aperture !== undefined
+            && Number.isFinite(suppliedFocus.aperture)
+              ? Math.max(0, suppliedFocus.aperture)
+              : this.dofAperture;
+        }
       }
     }
     this.composer.render();
@@ -250,6 +285,7 @@ export class PostFX {
       this.builtInAoPass = builtInAoPass;
       this.bokehPass = bokeh;
       this.smaaPass = smaa;
+      this.applyDofSettings();
       return true;
     } catch {
       try {
@@ -272,6 +308,14 @@ export class PostFX {
       ...this.aoSettings,
       enabled: this.aoSettings.enabled && !this.forceLowEnd,
     });
+  }
+
+  private applyDofSettings(): void {
+    if (!this.bokehPass) return;
+    this.bokehPass.enabled = this.dofEnabled && !this.forceLowEnd;
+    const uniforms = this.bokehPass.uniforms as BokehUniforms;
+    if (uniforms.aperture) uniforms.aperture.value = this.dofAperture;
+    if (uniforms.maxblur) uniforms.maxblur.value = 0.01;
   }
 
   private resizeAoPass(): void {

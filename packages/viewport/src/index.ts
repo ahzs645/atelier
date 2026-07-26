@@ -12,6 +12,7 @@ export {
 export {
   LightingRig,
   type DirectionalLightSpec,
+  type EnvironmentResult,
   type EnvironmentSource,
   type HdriLightAnalyzer,
   type LightingPreset,
@@ -22,6 +23,8 @@ export {
   type AoPass,
   type AoPassFactory,
   type AoSettings,
+  type DofFocus,
+  type DofFocusProvider,
   type PostSettings,
 } from './post';
 export {

@@ -27,6 +27,10 @@ export type EnvironmentSource =
     analyzeLights?: HdriLightAnalyzer;
   };
 
+export type EnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
 interface GroundOptions {
   grid?: boolean;
   shadowCatcher?: boolean;
@@ -113,7 +117,10 @@ export class LightingRig {
     this.invalidate();
   }
 
-  async setEnvironment(source: EnvironmentSource, intensity = 1): Promise<void> {
+  async setEnvironment(
+    source: EnvironmentSource,
+    intensity = 1,
+  ): Promise<EnvironmentResult> {
     const request = ++this.environmentRequest;
     const key = source === 'room' ? 'room' : source.hdri;
     this.setEnvironmentIntensity(intensity);
@@ -123,49 +130,76 @@ export class LightingRig {
         const analyzed = this.analyzedLightCache.get(key);
         if (analyzed) this.setLights(analyzed);
       }
-      this.applyEnvironment(cached, request);
-      return;
+      return this.applyEnvironment(cached, request)
+        ? { ok: true }
+        : this.cancelledEnvironmentResult();
     }
 
-    const pmrem = this.getPmrem();
     try {
+      const pmrem = this.getPmrem();
       let texture: THREE.Texture;
       if (source === 'room') {
         const room = new RoomEnvironment();
-        texture = pmrem.fromScene(room, 0.04).texture;
-        room.dispose();
+        try {
+          texture = pmrem.fromScene(room, 0.04).texture;
+        } finally {
+          room.dispose();
+        }
       } else {
         const hdr = await new RGBELoader()
           .setDataType(THREE.FloatType)
           .loadAsync(source.hdri);
-        if (this.disposed) {
+        if (!this.isCurrentEnvironmentRequest(request)) {
           hdr.dispose();
-          return;
+          return this.cancelledEnvironmentResult();
         }
-        if (source.analyzeLights) {
-          let analyzed: readonly DirectionalLightSpec[] = [];
-          try {
-            analyzed = source.analyzeLights(hdr, source.hdri);
-          } catch {
-            // A failed app analyzer must not prevent the environment from loading.
+        try {
+          if (source.analyzeLights) {
+            let analyzed: readonly DirectionalLightSpec[] = [];
+            try {
+              analyzed = source.analyzeLights(hdr, source.hdri);
+            } catch {
+              // A failed app analyzer must not prevent the environment from loading.
+            }
+            const cachedSpecs = analyzed.map((spec) => this.copyLightSpec(spec));
+            this.analyzedLightCache.set(key, cachedSpecs);
+            if (request === this.environmentRequest) this.setLights(cachedSpecs);
           }
-          const cachedSpecs = analyzed.map((spec) => this.copyLightSpec(spec));
-          this.analyzedLightCache.set(key, cachedSpecs);
-          if (request === this.environmentRequest) this.setLights(cachedSpecs);
+          hdr.mapping = THREE.EquirectangularReflectionMapping;
+          texture = pmrem.fromEquirectangular(hdr).texture;
+        } finally {
+          hdr.dispose();
         }
-        hdr.mapping = THREE.EquirectangularReflectionMapping;
-        texture = pmrem.fromEquirectangular(hdr).texture;
-        hdr.dispose();
       }
-      if (this.disposed) {
+      if (!this.isCurrentEnvironmentRequest(request)) {
         texture.dispose();
-        return;
+        return this.cancelledEnvironmentResult();
       }
       this.environmentCache.set(key, texture);
-      this.applyEnvironment(texture, request);
-    } catch {
-      // A missing/CORS-blocked HDRI leaves the current direct-light rig active.
+      return this.applyEnvironment(texture, request)
+        ? { ok: true }
+        : this.cancelledEnvironmentResult();
+    } catch (error: unknown) {
+      if (!this.isCurrentEnvironmentRequest(request)) {
+        return this.cancelledEnvironmentResult();
+      }
+      return {
+        ok: false,
+        reason: `Failed to load environment "${key}": ${this.errorMessage(error)}`,
+      };
     }
+  }
+
+  /**
+   * Remove image-based lighting and cancel the active request.
+   * Cached PMREM textures remain cache-owned until dispose().
+   */
+  clearEnvironment(): void {
+    if (this.disposed) return;
+    this.environmentRequest += 1;
+    this.scene.environment = null;
+    this.activeEnvironment = null;
+    this.invalidate();
   }
 
   setEnvironmentIntensity(value: number): void {
@@ -299,11 +333,24 @@ export class LightingRig {
       && color.every((component) => typeof component === 'number');
   }
 
-  private applyEnvironment(texture: THREE.Texture, request: number): void {
-    if (this.disposed || request !== this.environmentRequest) return;
+  private applyEnvironment(texture: THREE.Texture, request: number): boolean {
+    if (!this.isCurrentEnvironmentRequest(request)) return false;
     this.activeEnvironment = texture;
     this.scene.environment = texture;
     this.invalidate();
+    return true;
+  }
+
+  private isCurrentEnvironmentRequest(request: number): boolean {
+    return !this.disposed && request === this.environmentRequest;
+  }
+
+  private cancelledEnvironmentResult(): EnvironmentResult {
+    return { ok: false, reason: 'Environment request was cancelled.' };
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private clearGround(): void {
