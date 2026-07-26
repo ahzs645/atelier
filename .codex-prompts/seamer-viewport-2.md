@@ -59,7 +59,39 @@ and body cylinders, the *semantics* of seams/measurements, arrangement logic, cl
 - The WebGPU cloth drape stays wired through `@atelier/sim`'s `SolverRunner`. It cannot be
   verified headlessly — say so, do not claim it works.
 
-## Part 2 — clean up the temporary alias
+## Part 2a — delete the duplicate command layer
+
+`seamer-studio/src/lib/commands/` (11 files, **2103 LOC**) is the pre-migration command system,
+still living alongside the canonical `packages/pattern-model/src/commands/`. The two registries
+have already diverged — the local one has 76 commands, the package one has 86.
+
+The Command Palette and dispatcher already use the package registry, so the local `registry.ts`,
+`execute.ts`, `types.ts` and `index.ts` are now dead — **verify that, then delete them.**
+
+What is still live is the *pure reducers* — six files import them:
+
+```
+src/lib/components/LayerPanel.svelte      ← layerRename, layerSetStyle, LayerStyle  (structural)
+src/lib/components/PropertyPanel.svelte   ← variableReorder, variableSetOptions, imageUpdate (structural), formulaSet (create)
+src/lib/components/SeamPanel.svelte       ← seamReverse (create)
+src/lib/components/PatternCanvas2D.svelte ← pieceAddPath (piece), piecePointAdd/piecePointUpdate (create), layerDashPattern/layerStrokeColor/LayerStyle (structural)
+src/lib/utils/arcParametric.test.ts       ← executeCommand, ExecuteHost (execute)
+```
+
+These are `Pattern`-typed domain logic and belong in the plugin. **Move them into
+`packages/pattern-model/src/commands/`** (merging with the existing files where the same
+reducer already exists — do not create a second copy), repoint every importer at
+`@seamer/pattern-model`, then **delete `src/lib/commands/` entirely.**
+
+Before deleting, diff each reducer against its `pattern-model` counterpart. If they have
+diverged, reconcile deliberately and **report every difference** — do not assume the newer one
+wins. Move `commands.test.ts` / `create.test.ts` across too; do not lose coverage.
+
+This is MIGRATION.md ground rule #3 ("the old code is deleted in the same PR that adopts the new
+package") being applied late. Leaving two implementations is exactly how the original two repos
+diverged.
+
+## Part 2b — clean up the temporary alias
 
 A previous concurrent job added this compatibility shim to `seamer-studio/svelte.config.js`:
 
