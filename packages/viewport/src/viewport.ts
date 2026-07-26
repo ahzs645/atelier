@@ -6,6 +6,7 @@ import { LightingRig } from './lighting';
 import { OverlayLayer, overlayLayerInternal } from './overlay';
 import { PickService } from './picking';
 import { PostFX, postFxInternal } from './post';
+import type { AoPassFactory } from './post';
 
 export interface ViewportOptions {
   container: HTMLElement;
@@ -13,6 +14,38 @@ export interface ViewportOptions {
   preserveDrawingBuffer?: boolean;
   antialias?: boolean;
   postProcessing?: boolean;
+  /** Supply a custom AO pass (for example N8AO). Omit for the built-in GTAO. */
+  aoPassFactory?: AoPassFactory;
+}
+
+/** Pure reference counter used by Viewport's continuous-render leases. */
+export class RenderLeaseCounter {
+  private count = 0;
+  private disposed = false;
+
+  constructor(private readonly onFirstAcquire: () => void = () => {}) {}
+
+  get size(): number {
+    return this.count;
+  }
+
+  acquire(): () => void {
+    if (this.disposed) return () => {};
+    this.count += 1;
+    if (this.count === 1) this.onFirstAcquire();
+    let released = false;
+    return () => {
+      if (released || this.disposed) return;
+      released = true;
+      this.count = Math.max(0, this.count - 1);
+    };
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.count = 0;
+  }
 }
 
 /** Facade wiring the independently disposable viewport subsystems. */
@@ -32,6 +65,7 @@ export class Viewport {
   private frame = 0;
   private dirty = true;
   private disposed = false;
+  private readonly renderLeases = new RenderLeaseCounter(() => this.invalidate());
 
   constructor(options: ViewportOptions) {
     this.container = options.container;
@@ -66,6 +100,7 @@ export class Viewport {
       () => this.camera.camera,
       () => this.invalidate(),
       () => this.camera.controls.target,
+      options.aoPassFactory ?? null,
     );
     this.picking = new PickService(
       () => this.camera.camera,
@@ -108,6 +143,16 @@ export class Viewport {
     }
   }
 
+  /** Hold the render loop open until the returned idempotent release is called. */
+  acquireRenderLease(reason?: string): () => void {
+    void reason;
+    return this.renderLeases.acquire();
+  }
+
+  get renderLeaseCount(): number {
+    return this.renderLeases.size;
+  }
+
   resize(): void {
     if (this.disposed) return;
     const width = Math.max(1, this.container.clientWidth);
@@ -135,6 +180,7 @@ export class Viewport {
     this.disposed = true;
     if (this.view && this.frame !== 0) this.view.cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.renderLeases.dispose();
     this.view?.removeEventListener('resize', this.handleWindowResize);
     this.gizmos.dispose();
     this.picking.dispose();
@@ -160,8 +206,9 @@ export class Viewport {
     const wasDirty = this.dirty;
     this.dirty = false;
     const controlsChanged = this.camera[cameraRigInternal].update();
-    if (wasDirty || controlsChanged || this.dirty) this.render();
-    if (controlsChanged) this.invalidate();
+    const leased = this.renderLeaseCount > 0;
+    if (wasDirty || controlsChanged || this.dirty || leased) this.render();
+    if (controlsChanged || this.renderLeaseCount > 0) this.invalidate();
   };
 
   private readonly handleWindowResize = (): void => {

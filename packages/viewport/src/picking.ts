@@ -15,10 +15,24 @@ export interface PickHit {
   distance: number;
   faceIndex?: number;
   edgeIndex?: number;
+  /** The unmodified three.js intersection for semantic/editor-specific picking. */
+  intersection?: THREE.Intersection;
+  uv?: THREE.Vector2;
+  barycoord?: THREE.Vector3 | null;
+  instanceId?: number;
 }
 
 export interface PickOptions {
   kinds?: PickKind[];
+  lineThreshold?: number;
+  layers?: number[];
+  filter?: (object: THREE.Object3D) => boolean;
+}
+
+export interface RaycastOptions {
+  /** Explicit roots bypass registration and semantic filtering. Defaults to registered roots. */
+  objects?: readonly THREE.Object3D[];
+  recursive?: boolean;
   lineThreshold?: number;
   layers?: number[];
   filter?: (object: THREE.Object3D) => boolean;
@@ -92,8 +106,28 @@ export class PickService {
     return this.pickAt(event, options)[0] ?? null;
   }
 
-  pickAll(event: PointerEvent, options?: PickOptions): PickHit[] {
+  pickAll(
+    event: PointerEvent | PointerCoordinates,
+    options?: PickOptions,
+  ): PickHit[] {
     return this.pickAt(event, options);
+  }
+
+  /** Return three's full distance-sorted intersections without semantic deduplication. */
+  raycast(
+    event: PointerEvent | PointerCoordinates,
+    options: RaycastOptions = {},
+  ): THREE.Intersection[] {
+    const ndc = screenToNdc(event, this.element.getBoundingClientRect());
+    this.raycaster.params.Line.threshold = options.lineThreshold ?? 0.03;
+    if (this.raycaster.params.Line2) {
+      this.raycaster.params.Line2.threshold = options.lineThreshold ?? 0.03;
+    }
+    this.applyLayers(options.layers);
+    this.raycaster.setFromCamera(ndc, this.getCamera());
+    const roots = [...(options.objects ?? this.registrations.keys())];
+    const objects = options.filter ? roots.filter(options.filter) : roots;
+    return this.raycaster.intersectObjects(objects, options.recursive ?? true);
   }
 
   pickRegion(a: Vec2, b: Vec2, options: PickOptions = {}): PickHit[] {
@@ -187,20 +221,18 @@ export class PickService {
   }
 
   private pickAt(point: PointerCoordinates, options: PickOptions = {}): PickHit[] {
-    const ndc = screenToNdc(point, this.element.getBoundingClientRect());
-    this.raycaster.params.Line.threshold = options.lineThreshold ?? 0.03;
-    if (this.raycaster.params.Line2) {
-      this.raycaster.params.Line2.threshold = options.lineThreshold ?? 0.03;
-    }
-    this.applyLayers(options.layers);
-    this.raycaster.setFromCamera(ndc, this.getCamera());
     const objects = [...this.registrations.keys()].filter((object) => {
       const registration = this.registrations.get(object);
       return registration !== undefined
         && object.visible
         && this.matchesOptions(object, registration, options);
     });
-    const intersections = this.raycaster.intersectObjects(objects, true);
+    const intersections = this.raycast(point, {
+      objects,
+      recursive: true,
+      lineThreshold: options.lineThreshold,
+      layers: options.layers,
+    });
     const results: PickHit[] = [];
     const seen = new Set<string>();
     for (const intersection of intersections) {
@@ -221,12 +253,20 @@ export class PickService {
         point: intersection.point.clone(),
         docPoint: worldToDoc(intersection.point),
         distance: intersection.distance,
+        intersection,
       };
       if (intersection.faceIndex !== undefined && intersection.faceIndex !== null) {
         hit.faceIndex = intersection.faceIndex;
       }
       if (kind === 'edge' && intersection.index !== undefined) {
         hit.edgeIndex = Math.floor(intersection.index / 2);
+      }
+      if (intersection.uv) hit.uv = intersection.uv;
+      if (intersection.barycoord !== undefined) {
+        hit.barycoord = intersection.barycoord;
+      }
+      if (intersection.instanceId !== undefined) {
+        hit.instanceId = intersection.instanceId;
       }
       results.push(hit);
     }

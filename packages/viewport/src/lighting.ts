@@ -2,9 +2,30 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
-export type LightingPreset = 'studio' | 'flat' | 'technical' | 'hdri';
+export type LightingPreset = 'studio' | 'flat' | 'technical' | 'hdri' | 'none';
 
-type EnvironmentSource = 'room' | { hdri: string };
+export type RgbColor = readonly [number, number, number];
+
+export interface DirectionalLightSpec {
+  position: readonly [number, number, number];
+  color: THREE.ColorRepresentation | RgbColor;
+  intensity: number;
+  castShadow?: boolean;
+  shadowMapSize?: number;
+}
+
+export type HdriLightAnalyzer = (
+  texture: THREE.DataTexture,
+  url: string,
+) => readonly DirectionalLightSpec[];
+
+export type EnvironmentSource =
+  | 'room'
+  | {
+    hdri: string;
+    /** Runs once before PMREM conversion; its directional-light specs are cached by URL. */
+    analyzeLights?: HdriLightAnalyzer;
+  };
 
 interface GroundOptions {
   grid?: boolean;
@@ -19,6 +40,7 @@ export class LightingRig {
   private readonly invalidate: () => void;
   private readonly lights = new THREE.Group();
   private readonly environmentCache = new Map<string, THREE.Texture>();
+  private readonly analyzedLightCache = new Map<string, readonly DirectionalLightSpec[]>();
   private pmrem: THREE.PMREMGenerator | null = null;
   private ground: THREE.Group | null = null;
   private activeEnvironment: THREE.Texture | null = null;
@@ -39,7 +61,7 @@ export class LightingRig {
   }
 
   setPreset(preset: LightingPreset): void {
-    this.lights.clear();
+    this.clearLights();
     const addDirectional = (
       color: THREE.ColorRepresentation,
       intensity: number,
@@ -64,7 +86,9 @@ export class LightingRig {
       this.lights.add(light);
     };
 
-    if (preset === 'flat') {
+    if (preset === 'none') {
+      // Environment-only lighting intentionally has no direct-light fallback.
+    } else if (preset === 'flat') {
       this.lights.add(new THREE.AmbientLight(0xffffff, 2));
       this.lights.add(new THREE.HemisphereLight(0xffffff, 0xc8b69e, 1.1));
     } else if (preset === 'technical') {
@@ -82,12 +106,23 @@ export class LightingRig {
     this.invalidate();
   }
 
+  /** Replace the direct-light rig with engine-owned directional lights. */
+  setLights(specs: readonly DirectionalLightSpec[]): void {
+    this.clearLights();
+    for (const spec of specs) this.addDirectionalLight(spec);
+    this.invalidate();
+  }
+
   async setEnvironment(source: EnvironmentSource, intensity = 1): Promise<void> {
     const request = ++this.environmentRequest;
     const key = source === 'room' ? 'room' : source.hdri;
     this.setEnvironmentIntensity(intensity);
     const cached = this.environmentCache.get(key);
     if (cached) {
+      if (source !== 'room') {
+        const analyzed = this.analyzedLightCache.get(key);
+        if (analyzed) this.setLights(analyzed);
+      }
       this.applyEnvironment(cached, request);
       return;
     }
@@ -106,6 +141,17 @@ export class LightingRig {
         if (this.disposed) {
           hdr.dispose();
           return;
+        }
+        if (source.analyzeLights) {
+          let analyzed: readonly DirectionalLightSpec[] = [];
+          try {
+            analyzed = source.analyzeLights(hdr, source.hdri);
+          } catch {
+            // A failed app analyzer must not prevent the environment from loading.
+          }
+          const cachedSpecs = analyzed.map((spec) => this.copyLightSpec(spec));
+          this.analyzedLightCache.set(key, cachedSpecs);
+          if (request === this.environmentRequest) this.setLights(cachedSpecs);
         }
         hdr.mapping = THREE.EquirectangularReflectionMapping;
         texture = pmrem.fromEquirectangular(hdr).texture;
@@ -181,10 +227,12 @@ export class LightingRig {
     this.disposed = true;
     this.environmentRequest += 1;
     this.clearGround();
+    this.clearLights();
     this.scene.remove(this.lights);
     if (this.scene.environment === this.activeEnvironment) this.scene.environment = null;
     for (const texture of this.environmentCache.values()) texture.dispose();
     this.environmentCache.clear();
+    this.analyzedLightCache.clear();
     this.activeEnvironment = null;
     this.pmrem?.dispose();
     this.pmrem = null;
@@ -196,6 +244,59 @@ export class LightingRig {
       this.pmrem.compileEquirectangularShader();
     }
     return this.pmrem;
+  }
+
+  private addDirectionalLight(spec: DirectionalLightSpec): void {
+    const color = this.isRgbColor(spec.color)
+      ? new THREE.Color(spec.color[0], spec.color[1], spec.color[2])
+      : spec.color;
+    const light = new THREE.DirectionalLight(
+      color,
+      Math.max(0, spec.intensity),
+    );
+    light.position.set(spec.position[0], spec.position[1], spec.position[2]);
+    const castsShadow = spec.castShadow ?? false;
+    light.castShadow = castsShadow && this.shadows;
+    light.userData.atelierCastsShadow = castsShadow;
+    if (castsShadow) {
+      const size = Math.max(1, Math.round(spec.shadowMapSize ?? 2048));
+      light.shadow.mapSize.set(size, size);
+      light.shadow.camera.near = 0.1;
+      light.shadow.camera.far = 50;
+      light.shadow.camera.left = -10;
+      light.shadow.camera.right = 10;
+      light.shadow.camera.top = 10;
+      light.shadow.camera.bottom = -10;
+      light.shadow.bias = 0.0005;
+      light.shadow.normalBias = 0.03;
+    }
+    this.lights.add(light);
+  }
+
+  private clearLights(): void {
+    for (const child of [...this.lights.children]) {
+      this.lights.remove(child);
+      if (child instanceof THREE.Light) child.dispose();
+    }
+  }
+
+  private copyLightSpec(spec: DirectionalLightSpec): DirectionalLightSpec {
+    const color = this.isRgbColor(spec.color)
+      ? [spec.color[0], spec.color[1], spec.color[2]] as const
+      : spec.color;
+    return {
+      ...spec,
+      position: [spec.position[0], spec.position[1], spec.position[2]],
+      color,
+    };
+  }
+
+  private isRgbColor(
+    color: THREE.ColorRepresentation | RgbColor,
+  ): color is RgbColor {
+    return Array.isArray(color)
+      && color.length === 3
+      && color.every((component) => typeof component === 'number');
   }
 
   private applyEnvironment(texture: THREE.Texture, request: number): void {

@@ -1,7 +1,12 @@
 # Atelier — architecture
 
-Design document. **No code exists yet.** This defines package boundaries, public APIs, type
-contracts, and the decisions behind them. Read [`AUDIT.md`](AUDIT.md) first for the evidence.
+Design document and living reference for the implemented engine. It defines package boundaries,
+public APIs, type contracts, and the decisions behind them. Read [`AUDIT.md`](AUDIT.md) first
+for the evidence that motivated it.
+
+> **Status.** All seven packages are implemented and consumed by two apps (`packcad`,
+> `seamer-studio`). Where implementation resolved an open question, the answer is recorded
+> inline — see §7. This file is kept in sync with the code, not aspirational.
 
 ---
 
@@ -474,6 +479,7 @@ The three.js runtime. Imperative, framework-free (D1), decomposed (D7).
 
 ```ts
 import type * as THREE from 'three'
+import type { Pass } from 'three/addons/postprocessing/Pass.js'
 
 // --- units (D5) -------------------------------------------------------------
 export const MM_PER_M = 1000
@@ -490,6 +496,8 @@ export interface ViewportOptions {
   antialias?: boolean
   /** Skip EffectComposer entirely on low-end devices. */
   postProcessing?: boolean
+  /** Supply a custom AO pass (for example N8AO). Omit for the built-in GTAO. */
+  aoPassFactory?: AoPassFactory
 }
 
 export class Viewport {
@@ -507,6 +515,9 @@ export class Viewport {
   setProjection(p: Projection): void
   /** Mark the frame dirty. The loop is on-demand, not a free-running rAF. */
   invalidate(): void
+  /** Hold continuous rendering open until the idempotent release is called. */
+  acquireRenderLease(reason?: string): () => void
+  readonly renderLeaseCount: number
   resize(): void
   captureImage(mime?: string): string
   dispose(): void
@@ -564,12 +575,33 @@ export interface InputMap {
 }
 
 // --- lighting ---------------------------------------------------------------
-export type LightingPreset = 'studio' | 'flat' | 'technical' | 'hdri'
+export type LightingPreset = 'studio' | 'flat' | 'technical' | 'hdri' | 'none'
+
+export interface DirectionalLightSpec {
+  position: readonly [number, number, number]
+  color: THREE.ColorRepresentation | readonly [number, number, number]
+  intensity: number
+  castShadow?: boolean
+  shadowMapSize?: number
+}
 
 export class LightingRig {
   setPreset(preset: LightingPreset): void
-  /** RoomEnvironment PMREM (packager) or an .hdr URL (seamer). Cached by key. */
-  setEnvironment(source: 'room' | { hdri: string }, intensity?: number): Promise<void>
+  /** Replace direct lights; the rig constructs, owns, and disposes them. */
+  setLights(specs: readonly DirectionalLightSpec[]): void
+  /** RoomEnvironment PMREM or an HDRI. Environment and analyzed specs are cached by URL. */
+  setEnvironment(source:
+    | 'room'
+    | {
+        hdri: string
+        /** Runs before PMREM conversion while the Float32 HDR texels are available. */
+        analyzeLights?: (
+          texture: THREE.DataTexture,
+          url: string
+        ) => readonly DirectionalLightSpec[]
+      },
+    intensity?: number
+  ): Promise<void>
   setEnvironmentIntensity(v: number): void
   setShadows(enabled: boolean): void
   setBackground(color: string | null): void
@@ -584,12 +616,31 @@ export interface PostSettings {
   smaa?: boolean
 }
 
+export interface AoPass {
+  readonly pass: Pass
+  /** Set for passes such as N8AOPass that render scene beauty themselves. */
+  readonly replacesRenderPass?: boolean
+  apply(settings: NonNullable<PostSettings['ao']>): void
+  setSize(width: number, height: number): void
+  dispose(): void
+}
+
+export type AoPassFactory = (context: {
+  scene: THREE.Scene
+  camera: THREE.Camera
+  renderer: THREE.WebGLRenderer
+}) => AoPass | null
+
 export class PostFX {
   /** Returns false if the composer failed to build; the Viewport falls back to direct
    *  rendering. Ported from seamer's guarded composer construction. */
   setEnabled(on: boolean): boolean
   apply(settings: PostSettings): void
-  setQuality(opts: { forceLowEnd?: boolean; smaaScale?: number }): void
+  setQuality(opts: {
+    forceLowEnd?: boolean
+    smaaScale?: number
+    msaaSamples?: number
+  }): void
   dispose(): void
 }
 
@@ -609,6 +660,11 @@ export interface PickHit {
   faceIndex?: number
   /** Index into the object's edge list, when kind === 'edge'. */
   edgeIndex?: number
+  /** Unmodified three.js hit data; absent for non-raycast hits such as pickRegion(). */
+  intersection?: THREE.Intersection
+  uv?: THREE.Vector2
+  barycoord?: THREE.Vector3 | null
+  instanceId?: number
 }
 
 export interface PickOptions {
@@ -620,10 +676,27 @@ export interface PickOptions {
   filter?: (o: THREE.Object3D) => boolean
 }
 
+export interface RaycastOptions {
+  /** Explicit roots bypass registration and semantic filtering. */
+  objects?: readonly THREE.Object3D[]
+  recursive?: boolean
+  lineThreshold?: number
+  layers?: number[]
+  filter?: (o: THREE.Object3D) => boolean
+}
+
 export class PickService {
   /** Raycast from a pointer event against the registered pickable set. */
   pick(event: PointerEvent | { clientX: number; clientY: number }, opts?: PickOptions): PickHit | null
-  pickAll(event: PointerEvent, opts?: PickOptions): PickHit[]
+  pickAll(
+    event: PointerEvent | { clientX: number; clientY: number },
+    opts?: PickOptions
+  ): PickHit[]
+  /** Full distance-sorted native intersections, without semantic deduplication. */
+  raycast(
+    event: PointerEvent | { clientX: number; clientY: number },
+    opts?: RaycastOptions
+  ): THREE.Intersection[]
   /** Marquee/box select in screen space. */
   pickRegion(a: Vec2, b: Vec2, opts?: PickOptions): PickHit[]
 
@@ -643,13 +716,42 @@ export class PickService {
 ```ts
 // --- overlays ---------------------------------------------------------------
 export interface LineStyle { color: string; width: number; dashed?: boolean; opacity?: number }
+export interface OverlayOptions {
+  depthTest?: boolean
+  renderOrder?: number
+  parent?: THREE.Group
+}
+export interface CustomOverlayLabel {
+  object: THREE.Object3D
+  dispose(): void
+}
 
 export class OverlayLayer {
   /** Screen-space-width lines via LineSegments2/LineMaterial (both apps already use these). */
-  addLines(id: Id, segments: Float32Array, style: LineStyle): void
+  addLines(id: Id, segments: Float32Array, style: LineStyle, opts?: OverlayOptions): void
   updateLines(id: Id, segments: Float32Array): void
-  addLabel(id: Id, text: string, at: THREE.Vector3, mode?: 'billboard' | 'flat'): void
-  addPoints(id: Id, positions: Float32Array, style: { color: string; size: number }): void
+  addLabel(
+    id: Id,
+    text: string,
+    at: THREE.Vector3,
+    mode?: 'billboard' | 'flat',
+    opts?: OverlayOptions
+  ): void
+  /** App-rendered sprite/Object3D content; OverlayLayer assumes its disposal lifecycle. */
+  addCustomLabel(
+    id: Id,
+    label: CustomOverlayLabel,
+    at: THREE.Vector3,
+    opts?: OverlayOptions
+  ): void
+  addPoints(
+    id: Id,
+    positions: Float32Array,
+    style: { color: string; size: number },
+    opts?: OverlayOptions
+  ): void
+  /** Reuses the position buffer when positions.length is unchanged. */
+  updatePoints(id: Id, positions: Float32Array): void
   setVisible(id: Id, v: boolean): void
   setStyle(id: Id, style: Partial<LineStyle>): void
   remove(id: Id): void
@@ -659,16 +761,25 @@ export class OverlayLayer {
 
 // --- gizmos -----------------------------------------------------------------
 export type GizmoMode = 'translate' | 'rotate' | 'scale'
+export type GizmoSpace = 'local' | 'world'
+export interface GizmoHandleState {
+  axis: 'X' | 'Y' | 'Z' | 'E' | 'XY' | 'YZ' | 'XZ' | 'XYZ' | 'XYZE' | null
+  dragging: boolean
+}
 
 export class GizmoService {
   attach(object: THREE.Object3D, mode?: GizmoMode): void
   detach(): void
   setMode(mode: GizmoMode): void
+  setSpace(space: GizmoSpace): void
+  readonly space: GizmoSpace
+  readonly handleState: GizmoHandleState
   /** Restrict to a plane — '2d' arrangement editing wants XZ or XY only. */
   setPlane(plane: 'xy' | 'xz' | 'yz' | null): void
   onDragStart(fn: () => void): () => void
   onDrag(fn: (o: THREE.Object3D) => void): () => void
   onDragEnd(fn: (o: THREE.Object3D) => void): () => void
+  onHandleStateChange(fn: (state: GizmoHandleState) => void): () => void
   dispose(): void
 }
 
@@ -862,13 +973,15 @@ reads these; nothing else depends on object naming or scene-graph position.
 ### 5.3 Frame scheduling
 
 Rendering is **on demand**: `Viewport.invalidate()` marks dirty, one rAF renders. Continuous
-motion (orbit damping, a running solver) holds the loop open explicitly. Both apps currently
-run free rAF loops; this is a deliberate change and should measurably reduce idle GPU load.
+motion (orbit damping, a running solver, camera flight, or gizmo drag) holds the loop open with
+the reference-counted `acquireRenderLease()`. Each acquire returns an idempotent release; the
+last release returns the viewport to on-demand rendering.
 
 ### 5.4 Disposal
 
 Every class exposes `dispose()`. `Viewport.dispose()` cascades to all subsystems. GPU
-resources have exactly one owner. `ResourceScope` covers the bulk cases (D9).
+resources have exactly one owner. `Viewport.dispose()` also drops all render leases and cancels
+the scheduled frame. `ResourceScope` covers the bulk cases (D9).
 
 ### 5.5 Errors
 
@@ -934,11 +1047,9 @@ Flagged rather than guessed. None block starting Phase 0.
    `ViewportCanvas`. Decide with the code in front of you, not now.
 6. **Publishing.** Private registry, GitHub Packages, or git dependency? See MIGRATION §2 —
    affects nothing before Phase 1 ships.
-7. **Ambient occlusion: `GTAOPass` vs `n8ao`. [known deviation]** seamer's polished look comes
-   from the external `n8ao` package (`N8AOPass`). `PostFX` ships three r181's built-in
-   `GTAOPass` instead, to keep the engine dependency-light. **This will change seamer's shading
-   and must be checked against the Phase 0 reference images (risk R5).**
-   `PostFX` currently owns its composer with no injection point, so an app cannot swap the AO
-   pass — if the GTAO look is not acceptable, the fix is an engine change: an
-   `aoPassFactory` option on `ViewportOptions`, or exposing the composer for app-owned passes.
-   Deliberately not built speculatively; decide with the rendered comparison in front of you.
+7. ~~**Ambient occlusion: `GTAOPass` vs `n8ao`.**~~ **RESOLVED from Phase 3 consumer
+   feedback.** `PostFX` still defaults to three's `GTAOPass`, so existing consumers retain their
+   dependency-light path. `ViewportOptions.aoPassFactory` now accepts an app-owned `AoPass`
+   adapter, allowing seamer to insert `N8AOPass` without making `n8ao` an engine dependency or
+   reinterpreting its persisted AO settings. Returning `null` omits AO cleanly; construction
+   remains guarded and direct rendering remains the fallback if the composer cannot be built.

@@ -11,6 +11,19 @@ export interface LineStyle {
   opacity?: number;
 }
 
+export interface OverlayOptions {
+  depthTest?: boolean;
+  renderOrder?: number;
+  /** Attach to this app-owned group instead of the layer's scene-root group. */
+  parent?: THREE.Group;
+}
+
+/** A caller-created label whose lifecycle is transferred to OverlayLayer. */
+export interface CustomOverlayLabel {
+  object: THREE.Object3D;
+  dispose(): void;
+}
+
 type OverlayKind = 'lines' | 'label' | 'points';
 
 interface OverlayEntry {
@@ -18,6 +31,7 @@ interface OverlayEntry {
   object: THREE.Object3D;
   style?: LineStyle;
   texture?: THREE.Texture;
+  dispose?: () => void;
 }
 
 export const overlayLayerInternal: unique symbol = Symbol('OverlayLayer.internal');
@@ -51,7 +65,12 @@ export class OverlayLayer {
     this.scene.add(this.group);
   }
 
-  addLines(id: Id, segments: Float32Array, style: LineStyle): void {
+  addLines(
+    id: Id,
+    segments: Float32Array,
+    style: LineStyle,
+    options: OverlayOptions = {},
+  ): void {
     this.remove(id);
     const geometry = new LineSegmentsGeometry().setPositions(segments);
     const material = new LineMaterial({
@@ -67,8 +86,7 @@ export class OverlayLayer {
     const lines = new LineSegments2(geometry, material);
     if (style.dashed) lines.computeLineDistances();
     lines.frustumCulled = false;
-    lines.renderOrder = 10;
-    this.group.add(lines);
+    this.attach(lines, options, 10);
     this.entries.set(id, {
       kind: 'lines',
       object: lines,
@@ -90,6 +108,7 @@ export class OverlayLayer {
     text: string,
     at: THREE.Vector3,
     mode: 'billboard' | 'flat' = 'billboard',
+    options: OverlayOptions = {},
   ): void {
     this.remove(id);
     const label = this.createLabelTexture(text);
@@ -118,8 +137,7 @@ export class OverlayLayer {
       );
     }
     object.position.copy(at);
-    object.renderOrder = 12;
-    this.group.add(object);
+    this.attach(object, options, 12);
     this.entries.set(id, { kind: 'label', object, texture });
     this.invalidate();
   }
@@ -128,6 +146,7 @@ export class OverlayLayer {
     id: Id,
     positions: Float32Array,
     style: { color: string; size: number },
+    options: OverlayOptions = {},
   ): void {
     this.remove(id);
     const geometry = new THREE.BufferGeometry();
@@ -141,9 +160,48 @@ export class OverlayLayer {
     });
     const points = new THREE.Points(geometry, material);
     points.frustumCulled = false;
-    points.renderOrder = 11;
-    this.group.add(points);
+    this.attach(points, options, 11);
     this.entries.set(id, { kind: 'points', object: points });
+    this.invalidate();
+  }
+
+  /** Replace point positions, reusing the GPU attribute when its length is unchanged. */
+  updatePoints(id: Id, positions: Float32Array): void {
+    const entry = this.entries.get(id);
+    if (!entry || !(entry.object instanceof THREE.Points)) return;
+    const current = entry.object.geometry.getAttribute('position');
+    if (
+      current instanceof THREE.BufferAttribute
+      && current.array instanceof Float32Array
+      && current.array.length === positions.length
+    ) {
+      current.array.set(positions);
+      current.needsUpdate = true;
+    } else {
+      entry.object.geometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(positions, 3),
+      );
+    }
+    entry.object.geometry.computeBoundingSphere();
+    this.invalidate();
+  }
+
+  /** Add app-rendered sprite/Object3D label content and assume ownership of its disposer. */
+  addCustomLabel(
+    id: Id,
+    label: CustomOverlayLabel,
+    at: THREE.Vector3,
+    options: OverlayOptions = {},
+  ): void {
+    this.remove(id);
+    label.object.position.copy(at);
+    this.attach(label.object, options, 12);
+    this.entries.set(id, {
+      kind: 'label',
+      object: label.object,
+      dispose: () => label.dispose(),
+    });
     this.invalidate();
   }
 
@@ -176,9 +234,12 @@ export class OverlayLayer {
   remove(id: Id): void {
     const entry = this.entries.get(id);
     if (!entry) return;
-    this.group.remove(entry.object);
-    this.disposeObject(entry.object);
-    entry.texture?.dispose();
+    entry.object.removeFromParent();
+    if (entry.dispose) entry.dispose();
+    else {
+      this.disposeObject(entry.object);
+      entry.texture?.dispose();
+    }
     this.entries.delete(id);
     this.invalidate();
   }
@@ -195,6 +256,23 @@ export class OverlayLayer {
         entry.object.material.resolution.set(this.width, this.height);
       }
     }
+  }
+
+  private attach(
+    object: THREE.Object3D,
+    options: OverlayOptions,
+    defaultRenderOrder: number,
+  ): void {
+    object.renderOrder = options.renderOrder ?? defaultRenderOrder;
+    if (options.depthTest !== undefined) {
+      object.traverse((child) => {
+        for (const material of this.getMaterials(child)) {
+          material.depthTest = options.depthTest ?? material.depthTest;
+          material.needsUpdate = true;
+        }
+      });
+    }
+    (options.parent ?? this.group).add(object);
   }
 
   dispose(): void {
@@ -244,5 +322,18 @@ export class OverlayLayer {
         : [object.material];
       for (const material of materials) material.dispose();
     }
+  }
+
+  private getMaterials(object: THREE.Object3D): THREE.Material[] {
+    if (
+      !(object instanceof THREE.Mesh)
+      && !(object instanceof THREE.Points)
+      && !(object instanceof THREE.Sprite)
+      && !(object instanceof THREE.Line)
+      && !(object instanceof THREE.LineSegments)
+    ) {
+      return [];
+    }
+    return Array.isArray(object.material) ? object.material : [object.material];
   }
 }

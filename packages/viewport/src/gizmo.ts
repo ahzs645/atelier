@@ -3,6 +3,14 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 export type GizmoMode = 'translate' | 'rotate' | 'scale';
+export type GizmoSpace = 'local' | 'world';
+export type GizmoHandle = TransformControls['axis'];
+
+export interface GizmoHandleState {
+  axis: GizmoHandle;
+  dragging: boolean;
+}
+
 type GizmoPlane = 'xy' | 'xz' | 'yz' | null;
 
 export const gizmoServiceInternal: unique symbol = Symbol('GizmoService.internal');
@@ -25,6 +33,13 @@ export class GizmoService {
   private readonly startListeners = new Set<() => void>();
   private readonly dragListeners = new Set<(object: THREE.Object3D) => void>();
   private readonly endListeners = new Set<(object: THREE.Object3D) => void>();
+  private readonly handleStateListeners = new Set<
+    (state: GizmoHandleState) => void
+  >();
+  private handleStateValue: GizmoHandleState = {
+    axis: null,
+    dragging: false,
+  };
   private disposed = false;
   readonly [gizmoServiceInternal]: GizmoServiceInternal = {
     setCamera: (camera) => this.replaceCamera(camera),
@@ -48,6 +63,7 @@ export class GizmoService {
     this.transform.addEventListener('objectChange', this.handleObjectChange);
     this.transform.addEventListener('mouseUp', this.handleMouseUp);
     this.transform.addEventListener('dragging-changed', this.handleDraggingChanged);
+    this.transform.addEventListener('axis-changed', this.handleAxisChanged);
   }
 
   attach(object: THREE.Object3D, mode: GizmoMode = 'translate'): void {
@@ -60,6 +76,8 @@ export class GizmoService {
   detach(): void {
     this.attached = null;
     this.transform.detach();
+    if (this.orbit && this.handleStateValue.dragging) this.orbit.enabled = true;
+    this.syncHandleState(null, false);
     this.invalidate();
   }
 
@@ -67,6 +85,19 @@ export class GizmoService {
     this.transform.setMode(mode);
     this.applyPlaneVisibility();
     this.invalidate();
+  }
+
+  setSpace(space: GizmoSpace): void {
+    this.transform.setSpace(space);
+    this.invalidate();
+  }
+
+  get space(): GizmoSpace {
+    return this.transform.space;
+  }
+
+  get handleState(): GizmoHandleState {
+    return { ...this.handleStateValue };
   }
 
   setPlane(plane: GizmoPlane): void {
@@ -90,6 +121,11 @@ export class GizmoService {
     return () => this.endListeners.delete(fn);
   }
 
+  onHandleStateChange(fn: (state: GizmoHandleState) => void): () => void {
+    this.handleStateListeners.add(fn);
+    return () => this.handleStateListeners.delete(fn);
+  }
+
   private replaceCamera(camera: THREE.Camera): void {
     this.transform.camera = camera;
     this.invalidate();
@@ -103,6 +139,7 @@ export class GizmoService {
     this.transform.removeEventListener('objectChange', this.handleObjectChange);
     this.transform.removeEventListener('mouseUp', this.handleMouseUp);
     this.transform.removeEventListener('dragging-changed', this.handleDraggingChanged);
+    this.transform.removeEventListener('axis-changed', this.handleAxisChanged);
     this.scene.remove(this.helper);
     if (this.element) this.transform.dispose();
     else if ('dispose' in this.helper && typeof this.helper.dispose === 'function') {
@@ -111,6 +148,7 @@ export class GizmoService {
     this.startListeners.clear();
     this.dragListeners.clear();
     this.endListeners.clear();
+    this.handleStateListeners.clear();
   }
 
   private applyPlaneVisibility(): void {
@@ -145,6 +183,7 @@ export class GizmoService {
     if (this.plane === 'xy') this.planeCoordinate = this.attached.position.z;
     else if (this.plane === 'xz') this.planeCoordinate = this.attached.position.y;
     else if (this.plane === 'yz') this.planeCoordinate = this.attached.position.x;
+    this.syncHandleState();
     for (const listener of this.startListeners) listener();
   };
 
@@ -158,12 +197,33 @@ export class GizmoService {
   private readonly handleMouseUp = (): void => {
     if (!this.attached) return;
     for (const listener of this.endListeners) listener(this.attached);
+    this.syncHandleState();
     this.invalidate();
   };
 
   private readonly handleDraggingChanged = (event: { value: unknown }): void => {
-    if (typeof event.value === 'boolean' && this.orbit) {
-      this.orbit.enabled = !event.value;
+    if (typeof event.value === 'boolean') {
+      if (this.orbit) this.orbit.enabled = !event.value;
+      this.syncHandleState(this.transform.axis, event.value);
     }
   };
+
+  private readonly handleAxisChanged = (): void => {
+    this.syncHandleState();
+  };
+
+  private syncHandleState(
+    axis: GizmoHandle = this.transform.axis,
+    dragging = this.transform.dragging,
+  ): void {
+    if (
+      axis === this.handleStateValue.axis
+      && dragging === this.handleStateValue.dragging
+    ) {
+      return;
+    }
+    this.handleStateValue = { axis, dragging };
+    const state = this.handleState;
+    for (const listener of this.handleStateListeners) listener(state);
+  }
 }
