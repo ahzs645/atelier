@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  "references": [
+    { "path": "../../packages/geometry" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/viewport" },
+    { "path": "../../packages/io" },
+    { "path": "../../packages/react" }
+  ]
+}

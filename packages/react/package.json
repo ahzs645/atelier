@@ -19,7 +19,7 @@
     "@atelier/viewport": "workspace:*"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=19 <20"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

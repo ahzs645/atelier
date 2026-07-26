@@ -423,6 +423,10 @@ export class Editor<T> {
   redo(): boolean
   get canUndo(): boolean
   get canRedo(): boolean
+  /** Labels for "Undo Add seam" / "Redo Move point" UI. */
+  get undoLabel(): string | null
+  get redoLabel(): string | null
+  get historyLabels(): readonly string[]
 
   /** Minimal observer surface. Bindings adapt this to hooks / runes. */
   on(event: EditorEvent, fn: (e: Editor<T>) => void): () => void
@@ -812,14 +816,19 @@ export function useEditor<T>(editor: Editor<T>): {
   undo(): void; redo(): void; canUndo: boolean; canRedo: boolean
   undoLabel: string | null; redoLabel: string | null
 }
+/** Both bindings take mount options WITHOUT `container` — the binding owns the node. */
+export type ViewportMountOptions = Omit<ViewportOptions, 'container'> & {
+  container?: HTMLElement
+  onReady?: (viewport: Viewport) => void
+}
 export function useSelection<T>(editor: Editor<T>): [Selection, (s: Selection) => void]
 export function useCommand<T, P>(editor: Editor<T>, type: string): (params?: P) => CommandResult
 
 // @atelier/svelte  — Svelte 5 runes + actions
-export function viewport(node: HTMLElement, options: ViewportOptions): {
-  update(o: ViewportOptions): void
+export function viewport(node: HTMLElement, options: ViewportMountOptions): {
+  update(o: ViewportMountOptions): void
   destroy(): void
-}                                              // use:viewport={options}
+}                                              // use:viewport={{ onReady }}
 export function editorState<T>(editor: Editor<T>): {
   readonly doc: Doc<T>
   readonly content: T

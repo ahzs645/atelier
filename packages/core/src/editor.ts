@@ -129,6 +129,21 @@ export class Editor<T> {
     return this.#history.redoLabel !== null;
   }
 
+  /** Label of the edit the next `undo()` will revert, e.g. "Add seam". */
+  get undoLabel(): string | null {
+    return this.#history.undoLabel;
+  }
+
+  /** Label of the edit the next `redo()` will re-apply. */
+  get redoLabel(): string | null {
+    return this.#history.redoLabel;
+  }
+
+  /** Recent history labels, oldest first — for a history dropdown. */
+  get historyLabels(): readonly string[] {
+    return this.#history.labels;
+  }
+
   on(event: EditorEvent, fn: (editor: Editor<T>) => void): () => void {
     const listeners = this.#listeners.get(event) ?? new Set();
     listeners.add(fn);
