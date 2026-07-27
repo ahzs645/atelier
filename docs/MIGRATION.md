@@ -25,20 +25,30 @@ allowed to leave either app broken. Each phase is independently revertible.
 
 Atelier is a **separate repo, consumed as a dependency**. Three stages:
 
-**Stage A — local link (Phases 0–3).** Fast iteration, no publish cycle:
+**Stage A — local link (Phases 0–3).** Fast iteration, no publish cycle.
+
+> **Use `link:`, NOT `file:`.** This was wrong in the original plan and cost real debugging
+> time. pnpm resolves `file:` by copying the package into its store at install time, so engine
+> edits are invisible to the consuming app until the next `pnpm install` — an app can run a
+> stale snapshot of the engine while its typecheck and tests all pass. `link:` creates a direct
+> symlink to the source directory, which is what "fast iteration" actually requires.
+>
+> Symptom: a fix that demonstrably works in the engine tests appears to have no effect in the
+> app. Check with `ls -la <app>/node_modules/@atelier/<pkg>` — it must point at
+> `../../../atelier/packages/<pkg>`, not into `.pnpm/`.
 
 ```jsonc
 // packager/package.json, seamer/package.json
 "dependencies": {
-  "@atelier/core":     "file:../atelier/packages/core",
-  "@atelier/geometry": "file:../atelier/packages/geometry",
-  "@atelier/viewport": "file:../atelier/packages/viewport"
+  "@atelier/core":     "link:../atelier/packages/core",
+  "@atelier/geometry": "link:../atelier/packages/geometry",
+  "@atelier/viewport": "link:../atelier/packages/viewport"
 }
 ```
 
 Both apps sit beside `atelier/` under `~/github/Engine/`, so relative paths work today.
 Add a `pnpm dev:link` script that runs `tsc --watch` across the workspace and re-emits `dist/`
-on save. Vite picks up the change through the file: link with no extra config.
+on save. Vite picks up the change through the symlink with no extra config.
 
 > **Known cost of Stage A:** duplicate `three` instances if the apps and the engine each
 > resolve their own copy — this breaks `instanceof` checks silently and is genuinely

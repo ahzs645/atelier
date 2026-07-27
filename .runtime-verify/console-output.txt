@@ -1,7 +1,8 @@
-PACKCAD (http://localhost:55173/)
-none
+TARGETED RE-RUN: SEAMER FIRST-LOAD 3D PAINT
+URL: http://localhost:55174/studio
+Result: FAIL — viewport remained black after template load plus 6.5 seconds; UI reported female · 4 pieces.
 
-SEAMER STUDIO (http://localhost:55174/studio)
+CONSOLE WARNINGS / ERRORS (10; 10 unique)
 [warn] Seam particle count mismatch (Seam_znoy5u629): 28 vs 27 — fallback proportional sampling applied
 [warn] Seam particle count mismatch (Seam_a8hax3le5): 18 vs 17 — fallback proportional sampling applied
 [warn] Seam particle count mismatch (Seam_03zhl2036): 17 vs 18 — fallback proportional sampling applied
