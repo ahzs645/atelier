@@ -10,6 +10,7 @@
 
 import { CommandRegistry, Editor, createDoc } from '@atelier/core';
 import type { CommandDef } from '@atelier/core';
+import { StrictMode, useEffect } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useEditor } from './index';
@@ -140,5 +141,64 @@ describe('useEditor reactivity', () => {
     view.unmount();
     // No listeners should remain; executing must not throw.
     expect(() => editor.execute('counter.bump', { by: 1 })).not.toThrow();
+  });
+});
+
+// --- React Strict Mode ------------------------------------------------------
+//
+// Browser verification of `packcad` found every command inert. The cause was NOT this binding:
+// the app held the Editor in `useMemo` and disposed it from an effect cleanup, and Strict Mode's
+// development-only effect rehearsal disposed that live instance before the first user command.
+//
+// The engine behaves correctly here — `execute` on a disposed Editor returns
+// `{ ok: false, error: 'Editor disposed' }` rather than silently succeeding. It only *looked*
+// silent because the app discarded the result. These tests pin both halves so the footgun
+// cannot reappear unnoticed.
+
+describe('Strict Mode', () => {
+  it('reports a disposed editor instead of failing silently', () => {
+    const editor = makeEditor();
+    editor.dispose();
+    const result = editor.execute('counter.bump', { by: 1 });
+    expect(result.ok).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(result.error).toBe('Editor disposed');
+  });
+
+  it('stays live under Strict Mode when the editor outlives the component', () => {
+    // The correct pattern: the Editor's lifetime is owned outside the component tree, so Strict
+    // Mode's rehearsed mount/unmount cannot dispose it.
+    const editor = makeEditor();
+    render(
+      <StrictMode>
+        <Probe editor={editor} />
+      </StrictMode>,
+    );
+
+    act(() => {
+      editor.execute('counter.bump', { by: 2 });
+    });
+
+    expect(read('value')).toBe('2');
+    expect(read('canUndo')).toBe('true');
+  });
+
+  it('goes inert if an effect cleanup disposes the editor — the packcad failure', () => {
+    // Reproduces the original defect exactly: dispose from an effect cleanup under Strict Mode.
+    const editor = makeEditor();
+    function SelfDisposing(): React.ReactElement {
+      useEffect(() => () => editor.dispose(), []);
+      return <Probe editor={editor} />;
+    }
+    render(
+      <StrictMode>
+        <SelfDisposing />
+      </StrictMode>,
+    );
+
+    const result = editor.execute('counter.bump', { by: 1 });
+    // Strict Mode rehearses mount → unmount → mount, so the cleanup already ran.
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Editor disposed');
   });
 });
