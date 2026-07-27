@@ -2,7 +2,7 @@
   "name": "@atelier/svelte",
   "version": "0.1.0",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "exports": {
     ".": "./src/index.ts"
   },
