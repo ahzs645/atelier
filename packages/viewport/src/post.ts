@@ -36,7 +36,11 @@ export type DofFocusProvider = () => DofFocus | null;
 /** Adapter for an app-owned AO implementation inserted into the engine composer. */
 export interface AoPass {
   readonly pass: Pass;
-  /** N8AOPass renders scene beauty itself; set this to omit the preceding RenderPass. */
+  /**
+   * Set when the pass renders scene beauty itself (N8AO "Combined" mode). The engine keeps the
+   * RenderPass in the chain regardless and disables it only while this pass is enabled, because
+   * a pass that replaces the RenderPass stops drawing the scene when it is switched off.
+   */
   readonly replacesRenderPass?: boolean;
   apply(settings: AoSettings): void;
   setSize(width: number, height: number): void;
@@ -74,6 +78,8 @@ export class PostFX {
   private renderPass: RenderPass | null = null;
   private aoPass: AoPass | null = null;
   private builtInAoPass: GTAOPass | null = null;
+  /** True when the injected AO pass renders scene beauty itself (e.g. N8AO "Combined"). */
+  private aoReplacesRenderPass = false;
   private bokehPass: BokehPass | null = null;
   private smaaPass: SMAAPass | null = null;
   private enabled = false;
@@ -164,6 +170,17 @@ export class PostFX {
     this.applyDofSettings();
     if (this.smaaPass) this.smaaPass.enabled = this.smaaPass.enabled && !this.forceLowEnd;
     this.invalidate();
+  }
+
+  /**
+   * Exactly one pass must draw the scene. When the injected AO pass replaces the RenderPass it
+   * only draws while enabled, so the RenderPass is re-enabled whenever AO is off. Without this
+   * a document with AO disabled renders nothing at all and the viewport is black.
+   */
+  private syncRenderPass(): void {
+    if (!this.renderPass) return;
+    const aoDrawing = this.aoReplacesRenderPass && (this.aoPass?.pass.enabled ?? false);
+    this.renderPass.enabled = !aoDrawing;
   }
 
   private renderComposer(): boolean {
@@ -263,7 +280,11 @@ export class PostFX {
       // r181 sizes SMAA through setSize(); its constructor no longer takes width/height.
       const smaa = new SMAAPass();
       smaa.enabled = !this.forceLowEnd;
-      if (!aoPass?.replacesRenderPass) composer.addPass(render);
+      // The RenderPass is ALWAYS in the chain, even when an AO pass claims to replace it.
+      // A pass that renders scene beauty itself (N8AO's "Combined" mode) only does so while it
+      // is enabled; disabling it would otherwise leave nothing drawing the scene and the
+      // viewport would go black. `syncRenderPass()` keeps exactly one of the two active.
+      composer.addPass(render);
       if (aoPass) composer.addPass(aoPass.pass);
       composer.addPass(bokeh);
       composer.addPass(smaa);
@@ -280,11 +301,13 @@ export class PostFX {
         enabled: this.aoSettings.enabled && !this.forceLowEnd,
       });
       this.composer = composer;
-      this.renderPass = aoPass?.replacesRenderPass ? null : render;
+      this.renderPass = render;
+      this.aoReplacesRenderPass = aoPass?.replacesRenderPass ?? false;
       this.aoPass = aoPass;
       this.builtInAoPass = builtInAoPass;
       this.bokehPass = bokeh;
       this.smaaPass = smaa;
+      this.syncRenderPass();
       this.applyDofSettings();
       return true;
     } catch {
@@ -308,6 +331,8 @@ export class PostFX {
       ...this.aoSettings,
       enabled: this.aoSettings.enabled && !this.forceLowEnd,
     });
+    // Toggling AO can hand scene drawing between the AO pass and the RenderPass.
+    this.syncRenderPass();
   }
 
   private applyDofSettings(): void {

@@ -1,80 +1,14 @@
-PACKCAD
-[2026-07-26T20:52:52.728Z] WARN http://localhost:5173/@vite/client
-GLTFExporter: Use MeshStandardMaterial or MeshBasicMaterial for best results.
+PACKCAD (http://localhost:55173/)
+none
 
-[2026-07-26T20:52:52.728Z] WARN http://localhost:5173/@vite/client
-GLTFExporter: Use MeshStandardMaterial or MeshBasicMaterial for best results.
-
-SEAMER-STUDIO
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-%c[svelte] derived_inert
-%cReading a derived belonging to a now-destroyed effect may result in stale values
-https://svelte.dev/e/derived_inert font-weight: bold font-weight: normal
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-%c[svelte] derived_inert
-%cReading a derived belonging to a now-destroyed effect may result in stale values
-https://svelte.dev/e/derived_inert font-weight: bold font-weight: normal
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_znoy5u629): 28 vs 27 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_a8hax3le5): 18 vs 17 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_03zhl2036): 17 vs 18 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_rnbyzz1kv): 27 vs 28 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_uzave2eyv): 33 vs 34 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_sibuwpf53): 32 vs 33 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam length mismatch (Seam_wy83xwcua): from 25mm vs to 13mm — the longer edge will gather/ease
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_wy83xwcua): 3 vs 2 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam length mismatch (Seam_tkmnqyv5f): from 13mm vs to 25mm — the longer edge will gather/ease
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_tkmnqyv5f): 2 vs 3 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_znoy5u629): 28 vs 27 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_a8hax3le5): 18 vs 17 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_03zhl2036): 17 vs 18 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_rnbyzz1kv): 27 vs 28 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_uzave2eyv): 33 vs 34 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_sibuwpf53): 32 vs 33 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam length mismatch (Seam_wy83xwcua): from 25mm vs to 13mm — the longer edge will gather/ease
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_wy83xwcua): 3 vs 2 — fallback proportional sampling applied
-
-[2026-07-26T21:00:07.345Z] WARN http://localhost:5174/@vite/client
-Seam length mismatch (Seam_tkmnqyv5f): from 13mm vs to 25mm — the longer edge will gather/ease
-
-[2026-07-26T21:00:07.346Z] WARN http://localhost:5174/@vite/client
-Seam particle count mismatch (Seam_tkmnqyv5f): 2 vs 3 — fallback proportional sampling applied
-
-SEAMER DOM/UI ERROR
-Delaunator could not recover all polygon constraints without an incomplete mesh
+SEAMER STUDIO (http://localhost:55174/studio)
+[warn] Seam particle count mismatch (Seam_znoy5u629): 28 vs 27 — fallback proportional sampling applied
+[warn] Seam particle count mismatch (Seam_a8hax3le5): 18 vs 17 — fallback proportional sampling applied
+[warn] Seam particle count mismatch (Seam_03zhl2036): 17 vs 18 — fallback proportional sampling applied
+[warn] Seam particle count mismatch (Seam_rnbyzz1kv): 27 vs 28 — fallback proportional sampling applied
+[warn] Seam particle count mismatch (Seam_uzave2eyv): 33 vs 34 — fallback proportional sampling applied
+[warn] Seam particle count mismatch (Seam_sibuwpf53): 32 vs 33 — fallback proportional sampling applied
+[warn] Seam length mismatch (Seam_wy83xwcua): from 25mm vs to 13mm — the longer edge will gather/ease
+[warn] Seam particle count mismatch (Seam_wy83xwcua): 3 vs 2 — fallback proportional sampling applied
+[warn] Seam length mismatch (Seam_tkmnqyv5f): from 13mm vs to 25mm — the longer edge will gather/ease
+[warn] Seam particle count mismatch (Seam_tkmnqyv5f): 2 vs 3 — fallback proportional sampling applied

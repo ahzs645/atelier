@@ -179,8 +179,10 @@ describe('PostFX AO injection', () => {
     expect(setSize).toHaveBeenLastCalledWith(1280, 720);
     expect(postMocks.renderTargets.map((target) => target.samples)).toEqual([4, 4]);
     expect(dispose).toHaveBeenCalledTimes(1);
-    expect(postMocks.addedPasses[0]).toBe(ao.pass);
-    expect(postMocks.addedPasses).toHaveLength(4);
+    // The RenderPass is always present, immediately before the AO pass, even when the AO pass
+    // declares `replacesRenderPass` — see the "renderPass handover" tests below for why.
+    expect(postMocks.addedPasses[1]).toBe(ao.pass);
+    expect(postMocks.addedPasses).toHaveLength(5);
   });
 
   it('continues without an AO pass when the factory returns null', () => {
@@ -259,5 +261,63 @@ describe('PostFX AO injection', () => {
     expect(postMocks.bokehUniforms[0]?.focus.value).toBe(2.75);
     expect(postMocks.bokehUniforms[0]?.aperture.value).toBe(0.0075);
     post.dispose();
+  });
+});
+
+// Regression: browser verification found seamer-studio's 3D pane completely black on first load,
+// clearing only when the user toggled AO on. Cause: an AO pass declaring `replacesRenderPass`
+// draws scene beauty ONLY while enabled, and the engine had omitted the RenderPass entirely — so
+// a document with AO disabled (createEmptyPattern defaults `n8aoEnabled: false`) had nothing
+// drawing the scene at all.
+describe('PostFX renderPass handover', () => {
+  beforeEach(() => {
+    postMocks.addedPasses.length = 0;
+  });
+
+  function buildWithReplacingAo(enabled: boolean): { renderPass: Pass; aoPass: Pass } {
+    const aoInner = fakePass();
+    const ao: AoPass = {
+      pass: aoInner,
+      replacesRenderPass: true,
+      apply: (settings) => {
+        aoInner.enabled = settings.enabled;
+      },
+      setSize: () => {},
+      dispose: () => {},
+    };
+    const post = new PostFX(
+      fakeRenderer(),
+      new THREE.Scene(),
+      new THREE.PerspectiveCamera(),
+      () => {},
+      () => null,
+      () => ao,
+    );
+    post.setEnabled(true);
+    post.apply({ ao: { enabled } });
+    const isPass = (value: unknown): value is Pass =>
+      typeof value === 'object' && value !== null && 'enabled' in value;
+    const renderPass = postMocks.addedPasses.filter(isPass).find((candidate) => candidate !== aoInner);
+    if (!renderPass) throw new Error('RenderPass was not added to the composer');
+    return { renderPass, aoPass: aoInner };
+  }
+
+  it('keeps the RenderPass in the chain even when AO claims to replace it', () => {
+    const { renderPass } = buildWithReplacingAo(true);
+    expect(renderPass).toBeDefined();
+  });
+
+  it('enables the RenderPass when the replacing AO pass is disabled', () => {
+    const { renderPass, aoPass } = buildWithReplacingAo(false);
+    expect(aoPass.enabled).toBe(false);
+    // Something must still draw the scene.
+    expect(renderPass.enabled).toBe(true);
+  });
+
+  it('disables the RenderPass while the replacing AO pass is drawing', () => {
+    const { renderPass, aoPass } = buildWithReplacingAo(true);
+    expect(aoPass.enabled).toBe(true);
+    // Exactly one pass draws the scene; not both.
+    expect(renderPass.enabled).toBe(false);
   });
 });
