@@ -13,6 +13,7 @@ export type CameraView =
   | 'bottom'
   | 'isometric'
   | 'reset';
+export type CameraPreset = Exclude<CameraView, 'reset'>;
 export type CameraKind = 'perspective' | 'orthographic';
 export type InputAction = 'rotate' | 'pan' | 'dolly' | 'none';
 
@@ -101,6 +102,29 @@ function boxCorners(box: THREE.Box3): THREE.Vector3[] {
     new THREE.Vector3(max.x, max.y, min.z),
     new THREE.Vector3(max.x, max.y, max.z),
   ];
+}
+
+function presetPose(
+  view: CameraPreset,
+  target: THREE.Vector3,
+  distance: number,
+): { position: THREE.Vector3; up: THREE.Vector3 } {
+  const offset = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  if (view === 'front') offset.set(0, 0, distance);
+  else if (view === 'back') offset.set(0, 0, -distance);
+  else if (view === 'left') offset.set(-distance, 0, 0);
+  else if (view === 'right') offset.set(distance, 0, 0);
+  else if (view === 'top') {
+    offset.set(0, distance, 0);
+    up.set(0, 0, -1);
+  } else if (view === 'bottom') {
+    offset.set(0, -distance, 0);
+    up.set(0, 0, 1);
+  } else {
+    offset.set(distance, distance, distance).normalize().multiplyScalar(distance);
+  }
+  return { position: target.clone().add(offset), up };
 }
 
 /**
@@ -200,6 +224,7 @@ export class CameraRig {
     this.cancelFly();
     let target = this.controls.target.clone();
     let position: THREE.Vector3;
+    let up = new THREE.Vector3(0, 1, 0);
     if (view === 'reset') {
       target = new THREE.Vector3(0, this.projection === '2d' ? 0 : 0.9, 0);
       position = this.projection === '2d'
@@ -207,20 +232,11 @@ export class CameraRig {
         : new THREE.Vector3(0.5, 0.9, 1.6);
     } else {
       const distance = Math.max(this._camera.position.distanceTo(target), 1);
-      const offsets: Record<Exclude<CameraView, 'reset'>, THREE.Vector3> = {
-        front: new THREE.Vector3(0, 0, distance),
-        back: new THREE.Vector3(0, 0, -distance),
-        left: new THREE.Vector3(-distance, 0, 0),
-        right: new THREE.Vector3(distance, 0, 0),
-        top: new THREE.Vector3(0, distance, 0.001),
-        bottom: new THREE.Vector3(0, -distance, 0.001),
-        isometric: new THREE.Vector3(distance, distance, distance).normalize().multiplyScalar(distance),
-      };
-      position = target.clone().add(offsets[view]);
+      ({ position, up } = presetPose(view, target, distance));
     }
     this._camera.position.copy(position);
     this.controls.target.copy(target);
-    this._camera.up.set(0, 1, 0);
+    this._camera.up.copy(up);
     this._camera.lookAt(target);
     this.controls.update();
     this.emitChange();
@@ -340,6 +356,18 @@ export class CameraRig {
     });
   }
 
+  /**
+   * Animate to a standard view around the current orbit target while preserving
+   * the current camera-to-target distance.
+   */
+  flyToView(view: CameraPreset, durationMs = 700): Promise<void> {
+    const target = this.controls.target.clone();
+    const distance = Math.max(this._camera.position.distanceTo(target), 1);
+    const pose = presetPose(view, target, distance);
+    this._camera.up.copy(pose.up);
+    return this.flyTo(pose.position, target, durationMs);
+  }
+
   setInputMap(map: Partial<InputMap>): void {
     this.inputMap = {
       ...this.inputMap,
@@ -373,6 +401,7 @@ export class CameraRig {
     this.fov = THREE.MathUtils.clamp(state.fov, 10, 120);
     if (this._camera instanceof THREE.PerspectiveCamera) this._camera.fov = this.fov;
     this._camera.position.fromArray(state.position);
+    this._camera.up.set(0, 1, 0);
     this.controls.target.fromArray(state.target);
     this._camera.zoom = Math.max(Number.EPSILON, state.zoom);
     this._camera.updateProjectionMatrix();

@@ -29,6 +29,12 @@ export {
 export { installAutomationApi } from './automation';
 export {
   IndexedDbHistoryPersistence,
+  LocalDocumentStore,
   persisted,
+  type DocumentAutosave,
+  type DocumentAutosaveOptions,
+  type LocalDocumentMetadata,
+  type LocalDocumentStoreOptions,
+  type LocalDocumentVersionMetadata,
   type Persisted,
 } from './persist/index';

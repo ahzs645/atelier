@@ -16,6 +16,10 @@ export interface ViewportOptions {
   postProcessing?: boolean;
   /** Supply a custom AO pass (for example N8AO). Omit for the built-in GTAO. */
   aoPassFactory?: AoPassFactory;
+  /** Renderer construction boundary for hosts that provide a compatible WebGL renderer. */
+  rendererFactory?: (
+    parameters: THREE.WebGLRendererParameters,
+  ) => THREE.WebGLRenderer;
 }
 
 /** Pure reference counter used by Viewport's continuous-render leases. */
@@ -72,11 +76,14 @@ export class Viewport {
     this.view = this.container.ownerDocument.defaultView;
     this.projection = options.projection ?? '3d';
     this.scene = new THREE.Scene();
-    this.renderer = new THREE.WebGLRenderer({
+    const rendererParameters: THREE.WebGLRendererParameters = {
       antialias: options.antialias ?? true,
       preserveDrawingBuffer: options.preserveDrawingBuffer ?? false,
       powerPreference: 'high-performance',
-    });
+    };
+    this.renderer = options.rendererFactory
+      ? options.rendererFactory(rendererParameters)
+      : new THREE.WebGLRenderer(rendererParameters);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -188,6 +195,7 @@ export class Viewport {
     this.post.dispose();
     this.lighting.dispose();
     this.camera.dispose();
+    this.disposeSceneResources();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.container) {
       this.container.removeChild(this.renderer.domElement);
@@ -198,6 +206,39 @@ export class Viewport {
     if (!this.post[postFxInternal].render()) {
       this.renderer.render(this.scene, this.camera.camera);
     }
+  }
+
+  private disposeSceneResources(): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    const collectTexture = (value: unknown): void => {
+      if (value instanceof THREE.Texture) textures.add(value);
+    };
+    collectTexture(this.scene.background);
+    collectTexture(this.scene.environment);
+    this.scene.traverse((object) => {
+      const renderable = object as THREE.Object3D & {
+        geometry?: unknown;
+        material?: unknown;
+      };
+      if (renderable.geometry instanceof THREE.BufferGeometry) {
+        geometries.add(renderable.geometry);
+      }
+      const values = Array.isArray(renderable.material)
+        ? renderable.material
+        : [renderable.material];
+      for (const value of values) {
+        if (!(value instanceof THREE.Material)) continue;
+        materials.add(value);
+        for (const property of Object.values(value)) collectTexture(property);
+      }
+      if (object instanceof THREE.SkinnedMesh) object.skeleton.dispose();
+    });
+    for (const texture of textures) texture.dispose();
+    for (const material of materials) material.dispose();
+    for (const geometry of geometries) geometry.dispose();
+    this.scene.clear();
   }
 
   private readonly renderFrame = (): void => {

@@ -1,12 +1,19 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CameraRig,
   DEFAULT_INPUT_MAP,
   cameraRigInternal,
   resolveInputAction,
+  type CameraPreset,
   type CameraState,
   type InputMap,
 } from './camera';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('CameraRig pure state and framing', () => {
   it('round-trips serialised state across camera kinds', () => {
@@ -59,6 +66,114 @@ describe('CameraRig pure state and framing', () => {
     rig.fitDoc({ minX: -1000, minY: -500, maxX: 1000, maxY: 500 }, 1);
     expect(rig.getState().position[2]).toBeCloseTo(1);
     rig.dispose();
+  });
+});
+
+describe('CameraRig views and lifecycle', () => {
+  it.each([
+    ['front', [1, 2, 6], [0, 1, 0]],
+    ['back', [1, 2, 0], [0, 1, 0]],
+    ['left', [-2, 2, 3], [0, 1, 0]],
+    ['right', [4, 2, 3], [0, 1, 0]],
+    ['top', [1, 5, 3], [0, 0, -1]],
+    ['bottom', [1, -1, 3], [0, 0, 1]],
+    ['isometric', [
+      1 + Math.sqrt(3),
+      2 + Math.sqrt(3),
+      3 + Math.sqrt(3),
+    ], [0, 1, 0]],
+  ] satisfies Array<[CameraPreset, number[], number[]]>)(
+    'maps %s to its standard direction and up vector',
+    async (view, expectedPosition, expectedUp) => {
+      const rig = new CameraRig();
+      rig.setState({
+        kind: 'perspective',
+        position: [1, 2, 6],
+        target: [1, 2, 3],
+        zoom: 1,
+        fov: 54,
+      });
+
+      await rig.flyToView(view, 0);
+
+      rig.getState().position.forEach((value, index) => {
+        expect(value).toBeCloseTo(expectedPosition[index] ?? 0);
+      });
+      rig.camera.up.toArray().forEach((value, index) => {
+        expect(value).toBeCloseTo(expectedUp[index] ?? 0);
+      });
+      expect(rig.getState().target).toEqual([1, 2, 3]);
+      rig.dispose();
+    },
+  );
+
+  it('animates flyToView deterministically from the window frame clock', async () => {
+    let frameId = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(window.performance, 'now').mockReturnValue(0);
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id);
+    });
+    const runNextFrame = (now: number): void => {
+      const next = frames.entries().next().value;
+      if (!next) throw new Error('Expected a queued animation frame');
+      const [id, callback] = next;
+      frames.delete(id);
+      callback(now);
+    };
+    const canvas = document.createElement('canvas');
+    const rig = new CameraRig(canvas);
+    rig.setState({
+      kind: 'perspective',
+      position: [0, 0, 2],
+      target: [0, 0, 0],
+      zoom: 1,
+      fov: 54,
+    });
+
+    const flight = rig.flyToView('right', 1_000);
+    runNextFrame(500);
+    rig.getState().position.forEach((value, index) => {
+      expect(value).toBeCloseTo([1, 0, 1][index] ?? 0);
+    });
+
+    runNextFrame(1_000);
+    await flight;
+    rig.getState().position.forEach((value, index) => {
+      expect(value).toBeCloseTo([2, 0, 0][index] ?? 0);
+    });
+    expect(frames.size).toBe(0);
+    rig.dispose();
+  });
+
+  it('removes DOM input hooks and listeners on dispose', () => {
+    const canvas = document.createElement('canvas');
+    const removeElementListener = vi.spyOn(canvas, 'removeEventListener');
+    const removeWindowListener = vi.spyOn(window, 'removeEventListener');
+    const rig = new CameraRig(canvas);
+
+    rig.dispose();
+    rig.dispose();
+
+    expect(removeElementListener).toHaveBeenCalledWith(
+      'pointermove',
+      expect.any(Function),
+      true,
+    );
+    expect(removeWindowListener).toHaveBeenCalledWith(
+      'keydown',
+      expect.any(Function),
+      true,
+    );
+    expect(removeWindowListener).toHaveBeenCalledWith(
+      'blur',
+      expect.any(Function),
+    );
   });
 });
 

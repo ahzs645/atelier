@@ -1,4 +1,8 @@
 export interface SolverHandle<TState> {
+  /**
+   * Advances the solver by the runner's fixed timestep (`1 / targetHz`).
+   * The value is advisory: plugins whose update is not time-based may ignore it.
+   */
   step(dt: number): Promise<void> | void;
   read(out?: Float32Array): Float32Array;
   state(): TState;
@@ -20,6 +24,12 @@ export interface SolverContext {
   signal?: AbortSignal;
 }
 
+/**
+ * Drives a solver with a fixed timestep derived from `targetHz`.
+ *
+ * Scheduling uses wall-clock delays, but `step()` always receives
+ * `1 / targetHz`; plugins may treat that value as advisory.
+ */
 export class SolverRunner<TState> {
   readonly #handle: SolverHandle<TState>;
   readonly #intervalMs: number;
@@ -136,4 +146,3 @@ export class SolverRunner<TState> {
     resolve?.();
   }
 }
-

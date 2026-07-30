@@ -3,6 +3,7 @@ import {
   fromDXF,
   fromHPGL,
   fromSVG,
+  makeDrawing,
   markerToCutFile,
   tilePageCount,
   toCSV,
@@ -120,6 +121,39 @@ describe("golden vector exports", () => {
 });
 
 describe("format import and round-trip", () => {
+  it("builds a Drawing that round-trips through the DXF exporter", () => {
+    const built = makeDrawing(
+      [{
+        pts: [{ x: -5, y: 2 }, { x: 15, y: 8 }],
+        closed: false,
+        layer: "cut",
+      }],
+      [{
+        text: "Fold A",
+        at: { x: 4, y: 6 },
+        sizeMm: 3,
+        layer: "notes",
+      }],
+      new Map([["cut", { color: "#123456", width: 0.3 }]]),
+      new Map([["cut", "Cut lines"], ["notes", "Notes"]]),
+    );
+
+    expect(built.layers).toEqual([
+      {
+        id: "cut",
+        name: "Cut lines",
+        style: { color: "#123456", width: 0.3 },
+      },
+      { id: "notes", name: "Notes" },
+    ]);
+    expect(built.boundsMm).toEqual({ minX: -5, minY: 2, maxX: 15, maxY: 8 });
+
+    const restored = fromDXF(toDXF(built));
+    expect(restored.polys).toEqual(built.polys);
+    expect(restored.texts).toEqual(built.texts);
+    expect(restored.boundsMm).toEqual(built.boundsMm);
+  });
+
   it("round-trips HPGL geometry in plotter precision", () => {
     expect(fromHPGL(toHPGL({ ...drawing, texts: [] }))).toEqual([
       [

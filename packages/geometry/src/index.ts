@@ -62,6 +62,17 @@ export type { EdgeTopology } from "./topology";
 
 export { nest } from "./nest";
 export type { NestOptions, NestPlacement } from "./nest";
+export { nestSearch } from "./nestSearch";
+export type {
+  NestSearchBin,
+  NestSearchGravity,
+  NestSearchItem,
+  NestSearchOptions,
+  NestSearchPlacement,
+  NestSearchProgress,
+  NestSearchResult,
+  NestSearchStrategy,
+} from "./nestSearch";
 
 export { buildWarp } from "./thinPlateSpline";
 export type { MatchPair } from "./thinPlateSpline";

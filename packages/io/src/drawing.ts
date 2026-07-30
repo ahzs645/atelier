@@ -34,6 +34,10 @@ export function finiteBounds(
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : { ...EMPTY_BOUNDS };
 }
 
+/**
+ * Build a normalized Drawing from geometry, deriving finite bounds and the
+ * ordered layer list from the first occurrence of each layer id.
+ */
 export function makeDrawing(
   polys: DrawingPoly[],
   texts: DrawingText[],
@@ -109,4 +113,3 @@ export function hexToRgb(color: string): [number, number, number] {
     (number & 255) / 255,
   ];
 }
-

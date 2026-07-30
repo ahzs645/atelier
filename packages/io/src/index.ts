@@ -4,6 +4,7 @@ export {
   patternBoundsMm,
   TILE_OVERLAP_MM,
 } from "./types";
+export { EMPTY_BOUNDS, finiteBounds, makeDrawing } from "./drawing";
 export type {
   Drawing,
   DrawingLayer,
@@ -54,4 +55,3 @@ export type {
   CutFileResult,
   CuttingMachine,
 } from "./cutfile";
-

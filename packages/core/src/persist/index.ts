@@ -1,4 +1,12 @@
 export { IndexedDbHistoryPersistence } from './indexeddb';
+export { LocalDocumentStore } from './documents';
+export type {
+  DocumentAutosave,
+  DocumentAutosaveOptions,
+  LocalDocumentMetadata,
+  LocalDocumentStoreOptions,
+  LocalDocumentVersionMetadata,
+} from './documents';
 
 export interface Persisted<T> {
   get(): T;

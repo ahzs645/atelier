@@ -1,23 +1,45 @@
 # Atelier — migration plan
 
-How the two existing apps adopt the engine. Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Historical adoption plan and current outcome. Companion to
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-**Governing constraint:** packager and seamer stay shippable at every point. No phase is
-allowed to leave either app broken. Each phase is independently revertible.
+## Status / what actually happened — 2026-07-30
+
+This was **not** carried out as an in-place migration of `packager` and `seamer`.
+Those applications were forked into **PackCAD** (`packcad`) and **Seamer Studio**
+(`seamer-studio`), and the forks were built on Atelier from the start. They consume the
+implemented packages through `link:` dependencies.
+
+The original `packager` and `seamer` repositories remain untouched, with zero `@atelier/*`
+imports. They are deliberately kept read-only as parity and reference oracles; they are
+**not archived**. References below use `packcad`/`seamer-studio` for the current consumers and
+`packager`/`seamer` only when describing source provenance or legacy behavior.
+
+Phases 0–5 are effectively complete. Phase 6 remains optional and has not been undertaken:
+Seamer Studio still owns its Canvas2D drafting surface.
+
+| Phase | Status on 2026-07-30 |
+|---|---|
+| 0 — foundation | Complete: workspace, checks, CI, package boundaries, and three.js alignment |
+| 1 — geometry | Complete and consumed by both forks |
+| 2 — core | Complete and consumed by both forks |
+| 3 — viewport | Complete and consumed by both forks |
+| 4 — I/O | Complete and consumed by both forks |
+| 5 — simulation host | Complete; consumed by Seamer Studio |
+| 6 — unified 2D viewport | Not started; optional |
 
 ---
 
 ## 1. Ground rules
 
-1. **Extraction, not rewriting.** Code moves with its tests and its comments. seamer's source
-   comments explain *why* things are the way they are (embedded-browser modifier quirks,
-   composer fallbacks, coalescing windows) — that context is worth more than tidier code.
-2. **One behavioural change per phase, at most.** If a phase both moves code and changes
-   behaviour, split it.
-3. **The old code is deleted in the same PR that adopts the new package.** No parallel
-   implementations left "just in case" — that is how the two repos diverged originally.
-4. **Every extracted module keeps or gains a test.** seamer has ~20 test files, packager has 3
-   (AUDIT F7). Extraction is the moment to close that gap, not later.
+1. **Forks are the adoption boundary.** Changes land in `packcad`, `seamer-studio`, or
+   `atelier`; the legacy repositories stay read-only.
+2. **Preserve behavior deliberately.** Legacy source, fixtures, and screenshots remain the
+   reference when judging parity in the forks.
+3. **One behavioral change per step, at most.** Extraction and behavior changes should remain
+   independently reviewable.
+4. **Every shared module keeps or gains a test.** The package suites and
+   `examples/minimal` contract test are part of the repository gates.
 
 ---
 
@@ -25,7 +47,7 @@ allowed to leave either app broken. Each phase is independently revertible.
 
 Atelier is a **separate repo, consumed as a dependency**. Three stages:
 
-**Stage A — local link (Phases 0–3).** Fast iteration, no publish cycle.
+**Stage A — local link (current).** Fast iteration, no publish cycle.
 
 > **Use `link:`, NOT `file:`.** This was wrong in the original plan and cost real debugging
 > time. pnpm resolves `file:` by copying the package into its store at install time, so engine
@@ -38,7 +60,7 @@ Atelier is a **separate repo, consumed as a dependency**. Three stages:
 > `../../../atelier/packages/<pkg>`, not into `.pnpm/`.
 
 ```jsonc
-// packager/package.json, seamer/package.json
+// packcad/package.json, seamer-studio/package.json
 "dependencies": {
   "@atelier/core":     "link:../atelier/packages/core",
   "@atelier/geometry": "link:../atelier/packages/geometry",
@@ -46,18 +68,17 @@ Atelier is a **separate repo, consumed as a dependency**. Three stages:
 }
 ```
 
-Both apps sit beside `atelier/` under `~/github/Engine/`, so relative paths work today.
-Add a `pnpm dev:link` script that runs `tsc --watch` across the workspace and re-emits `dist/`
-on save. Vite picks up the change through the symlink with no extra config.
+Both current apps sit beside `atelier/` under `~/github/Engine/`, so relative paths work
+today. Seamer Studio also provides `pnpm dev:link` for workspace typechecking in watch mode.
 
 > **Known cost of Stage A:** duplicate `three` instances if the apps and the engine each
 > resolve their own copy — this breaks `instanceof` checks silently and is genuinely
 > hard to debug. Mitigation: `three` is a **peerDependency** of `@atelier/viewport`, never a
-> dependency, plus a Vite `resolve.dedupe: ['three']` in both apps. Verify with
-> `pnpm why three` before Phase 3 ships.
+> dependency, plus a Vite `resolve.dedupe: ['three']` in both apps. Atelier's lint gate also
+> asserts one three.js version in its lockfile.
 
-**Stage B — versioned tarballs (Phase 4+).** Once the API stops moving weekly, publish to a
-private registry or GitHub Packages and pin real semver. Apps upgrade deliberately.
+**Stage B — versioned packages (not started).** When local sibling links are no longer the
+right deployment model, publish to a registry and pin real semver so apps upgrade deliberately.
 
 **Stage C — public (optional).** Only if the engine gets a third consumer. The `@atelier`
 npm scope is unclaimed as of writing but should be verified before it matters.
@@ -66,7 +87,7 @@ npm scope is unclaimed as of writing but should be verified before it matters.
 
 ## 3. Phases
 
-### Phase 0 — Foundation
+### Phase 0 — Foundation *(effectively complete)*
 
 *Nothing is extracted. This phase only makes extraction possible.*
 
@@ -78,14 +99,15 @@ npm scope is unclaimed as of writing but should be verified before it matters.
   ship it in that app's own repo before Atelier depends on it.
 - Create empty `packages/*` with `index.ts` exporting nothing, so the graph is real.
 
-**Exit criteria:** both apps build and test green on the reconciled three version. Workspace
-`pnpm build && pnpm test` passes on empty packages. CI enforces the import rules.
+**Outcome:** the workspace contains all seven packages, CI runs `pnpm typecheck`,
+`pnpm test`, and `pnpm lint`, and the lint gate enforces package boundaries plus a single
+three.js lockfile version. PackCAD and Seamer Studio both use three.js 0.181.2.
 
 **Risk:** low. **Touches:** neither app's source, except the three upgrade.
 
 ---
 
-### Phase 1 — `@atelier/geometry`
+### Phase 1 — `@atelier/geometry` *(effectively complete)*
 
 *Purely additive. Nothing in either app changes behaviour.*
 
@@ -103,50 +125,56 @@ npm scope is unclaimed as of writing but should be verified before it matters.
   `buildEdgeTopology` / `orientFacesConsistently`.
 - **Resolve D6:** reimplement packager's `triangulateFace` + `faceDiagonals` on `delaunator`.
   See R2 below — this is gated work, not a checkbox.
-- Both apps re-export from the package and delete their copies.
+- Both forks consume the package; app-specific adapters remain app-owned.
 
-**Exit criteria:** seamer's existing geometry tests pass unchanged from inside the package.
-packager's fold output is **byte-identical** on all bundled fixtures (see R2). `cdt2d` is
-removed from packager's `package.json`.
+**Outcome:** Atelier's geometry tests pass, both forks consume the package, and PackCAD guards
+the triangulation difference and fold result in
+`packages/fold-solver/src/{triangulationParity,r2FoldOutcome}.test.ts`. The triangulators are
+not byte-identical on two near-cocircular faces, but the converged fold is unchanged within
+tolerance (see R2). `cdt2d` remains a PackCAD dev dependency solely for that parity test.
 
 **Risk:** medium, concentrated entirely in the triangulation swap.
-**Touches:** seamer `utils/patternGeometry.ts`, `geometry/*`; packager `model/foldGeometry.ts`.
+**Current paths:** `seamer-studio/packages/pattern-model/src/utils/patternGeometry.ts` and
+`seamer-studio/packages/cloth-sim/src/geometry/`; PackCAD consumes face topology and
+triangulation from `packages/packcad-format/src/foldGeometry.ts` and `packages/fold-solver/src/`.
 
 ---
 
-### Phase 2 — `@atelier/core`
+### Phase 2 — `@atelier/core` *(effectively complete)*
 
-*The highest-value phase. packager gains undo (AUDIT F2).*
+*The highest-value phase. PackCAD gains undo (AUDIT F2).*
 
 **Do:**
 - Build `Doc<T>`, `Selection`, `CommandRegistry<T>`, `Editor<T>`, `Transaction<T>`,
   `History<T>`, `installAutomationApi` per ARCHITECTURE §4.2.
 - Port seamer's `stores/localDB.ts` history functions → `IndexedDbHistoryPersistence`;
-  port `persisted<T>()` → `@atelier/core/persist`, keeping the SSR guards.
-- **seamer:** re-type its ~75 command defs against `CommandDef<Pattern>` — mechanical, the
+  port `persisted<T>()` into the `@atelier/core` public surface, keeping the SSR guards.
+- **Seamer Studio:** re-type its command defs against `CommandDef<Pattern>` — mechanical, the
   reducer shape already matches. Replace `stores/pattern.ts`'s undo/redo internals with
   `History<Pattern>`; replace the five parallel `Set<string>` selection stores with one
-  `Selection`. `window.seamer` keeps its exact shape via `installAutomationApi(editor, 'seamer')`.
-- **packager:** convert `model/operationPipeline.ts` (10 mutators) and `model/editorMutations.ts`
+  `Selection`. `installAutomationApi(editor, 'seamer')` installs the generic surface; Seamer
+  Studio must patch `getPattern`, the legacy selection object, and command metadata itself.
+- **PackCAD:** convert `src/model/operationPipeline.ts` and `src/model/editorMutations.ts`
   into `CommandDef<PackagingContent>[]`. Wire `Editor` into `App.tsx`. **Ship Cmd+Z.**
 
-**Exit criteria:** seamer's `commands.test.ts` and `create.test.ts` pass against the new bus.
-Undo/redo/coalescing behaviour is unchanged in seamer (verified by the Playwright e2e suite).
-packager has working labeled undo/redo with history persistence.
+**Outcome:** Seamer Studio's pattern store uses `Editor`, `History`, `Selection`, and
+`IndexedDbHistoryPersistence`; its app-side `patchAutomationSurface()` supplies legacy
+compatibility. PackCAD uses the same core command/history model with labeled undo/redo.
 
-**Risk:** medium for seamer (touches the store layer every component reads), low for packager
+**Risk:** medium for Seamer Studio (touches the store layer every component reads), low for PackCAD
 (purely additive).
-**Touches:** seamer `commands/*`, `stores/pattern.ts`, `stores/localDB.ts`, and every component
-that imports a selection store; packager `App.tsx`, `model/{operationPipeline,editorMutations}.ts`.
+**Current paths:** `seamer-studio/packages/pattern-model/src/commands/*` and
+`seamer-studio/src/lib/stores/{pattern,localDB}.ts`; `packcad/src/App.tsx` and
+`packcad/src/model/{operationPipeline,editorMutations}.ts`.
 
-> **Sequencing note.** The seamer selection-store change ripples through ~30 components.
+> **Sequencing note.** The Seamer Studio selection-store change ripples through ~30 components.
 > Consider splitting: **2a** = command bus + history (isolated), **2b** = selection unification
 > (broad). If 2b looks expensive when you get there, defer it — `Editor` can hold a `Selection`
-> while seamer's components keep reading their old stores through a shim.
+> while Seamer Studio's components keep reading their old stores through a shim.
 
 ---
 
-### Phase 3 — `@atelier/viewport`
+### Phase 3 — `@atelier/viewport` *(effectively complete)*
 
 *The biggest single phase. Decompose seamer's 2556-line `PatternRenderer` (D7).*
 
@@ -165,14 +193,15 @@ that imports a selection store; packager `App.tsx`, `model/{operationPipeline,ed
 6. `OverlayLayer` + `GizmoService` — from seamer's LineSegments2 overlays and `TransformControls`.
 7. `createSurfaceMaterial` — from seamer's `scene/materials.ts` (the generic PBR part;
    the label-badge shader injection stays seamer-side for now).
-8. **seamer:** `PatternRenderer` becomes a thin app-level orchestrator over the subsystems.
-9. **packager:** `ThreePreview`/`FoldScene` port off R3F onto `Viewport`. Delete
-   `render/{cameraControls,lightingEnvironment,meshMaterialGraph,sceneGeometry,raycastInteraction}.ts`.
+8. **Seamer Studio:** the 3D scene becomes a thin app-level orchestrator over the subsystems.
+9. **PackCAD:** the fold view moves onto `Viewport` through `@atelier/react`.
 
-**Exit criteria:** seamer's 3D pane is visually unchanged (compare `captureImage()` output
-against pre-migration references). packager's fold view is visually unchanged and its
-`data-*` diagnostic attributes — which `DielinePreview`/`FoldScene` write for external audits
-(`FoldScene.tsx:417-420`) — still resolve, or are consciously retired.
+**Outcome:** PackCAD mounts the engine with
+`packcad/src/components/ViewportPane.tsx` and builds its domain scene in
+`packcad/src/render/foldSceneBuilder.ts`. Seamer Studio orchestrates the same engine from
+`seamer-studio/src/lib/scene/scene3d.ts` and
+`seamer-studio/src/lib/components/PatternScene3D.svelte`; its cloth, avatar, materials, and
+overlay semantics remain app-owned.
 
 **Risk:** **high.** Largest surface, hardest to test, most likely to produce subtle visual
 regressions.
@@ -181,81 +210,63 @@ its own PR with a screenshot diff. Do not do 8 and 9 until 1–7 are all merged 
 
 ---
 
-### Phase 4 — `@atelier/io`
+### Phase 4 — `@atelier/io` *(effectively complete)*
 
 *Low risk, high mutual benefit. Both apps gain formats they don't have.*
 
 **Do:**
-- Define the neutral `Drawing` intermediate. Each app writes one flattener
+- Define the neutral `Drawing` intermediate. Each fork writes one flattener
   (`Pattern → Drawing`, `PackagingProject → Drawing`).
 - Lift seamer's `utils/{exporters,pdf,hpgl,cutfile}.ts` and its importers
   (`patternImport`, `cutImport`, `rulImport`, `seamlyImport`) onto `Drawing`.
 - Lift packager's `createExportDielineSvg` / `createModelGltf` (`model/exporters.ts`).
 - `@atelier/io/three` for glTF/OBJ/STL (three-dependent entry point, ARCHITECTURE §4.4).
 
-**What each app gains:** packager gets DXF, HPGL, tiled PDF, PNG, cut files. seamer gets glTF.
+**What each app gains:** PackCAD gets shared SVG/DXF/HPGL/PDF/CSV and three.js export paths;
+Seamer Studio gets the neutral drawing exporters, browser print/PNG helpers, cut files, and
+three.js export.
 
-**Exit criteria:** seamer's `export-formats.test.ts` and `cutfile.test.ts` pass from inside the
-package; both apps' export menus produce byte-identical output to pre-migration for every
-format they already had.
+**Outcome:** both forks consume `@atelier/io`. Current adapter paths are
+`packcad/src/model/drawing.ts`, `packcad/src/App.tsx`,
+`seamer-studio/src/lib/utils/exporters.ts`, and
+`seamer-studio/src/lib/utils/cutfile.ts`.
 
 **Risk:** low. Pure functions, existing tests, easily diffable output.
 
 ---
 
-### Phase 5 — `@atelier/sim` *(optional)*
+### Phase 5 — `@atelier/sim` *(effectively complete)*
 
-Only worth doing if a third consumer appears or packager's fold solver moves to GPU. The
-value is `requestDevice`/`isWebGPUAvailable`/`SolverRunner` — maybe 200 LOC of genuinely
-shared code. The WGSL and the fold solvers stay app-side regardless.
-
-**Recommendation:** defer. Revisit after Phase 4 ships.
+The package now provides `requestDevice`, `isWebGPUAvailable`,
+`webgpuUnavailableReason`, and `SolverRunner`. Seamer Studio consumes it; WGSL, cloth
+simulation, and fold solvers remain app-side.
 
 ---
 
 ### Phase 6 — Unified 2D viewport *(optional, expensive)*
 
-Port seamer's 3310-line `PatternCanvas2D.svelte` onto the engine's `projection: '2d'` (D8),
-as packager already does.
+Port Seamer Studio's `PatternCanvas2D.svelte` onto the engine's `projection: '2d'` (D8),
+as PackCAD already does.
 
 **Honest assessment:** this is the largest single body of work in the entire plan and the
-payoff is architectural consistency, not new capability. seamer's Canvas2D works and is
+payoff is architectural consistency, not new capability. Seamer Studio's Canvas2D works and is
 feature-rich (silhouettes, warped background images, HPGL overlays, frozen snapshots, notch
 rendering, seam arrows). There is a real argument it should stay Canvas2D forever — a 2D
 drafting canvas is a legitimate use for `CanvasRenderingContext2D`, and WebGL buys little at
 that scale.
 
-**Recommendation:** do not commit to this. Re-evaluate only if seamer needs 2D features that
+**Recommendation:** do not commit to this. Re-evaluate only if Seamer Studio needs 2D features that
 Canvas2D makes hard (e.g. very large patterns where GPU rendering wins).
 
 ---
 
 ## 4. three.js reconciliation
 
-packager is on **0.181.2**, seamer on **0.170.0** — 11 minor versions (AUDIT F3). Shared
-viewport code cannot exist until this is resolved.
-
-**Recommendation: upgrade seamer to 0.181.x**, in seamer's own repo, during Phase 0.
-
-*Rationale.* Moving forward is normal maintenance; pinning packager back to 0.170 means
-carrying a knowingly stale dependency in a new project from day one.
-
-*Expected fallout, in likely order of pain:*
-
-| Area | Why it's at risk |
-|---|---|
-| `EffectComposer` chain (`N8AOPass`, `BokehPass`, `SMAAPass`, `OutputPass`) | Post-processing addons track core closely; `n8ao` 1.10 must be checked against 0.181 |
-| Color management / tone mapping | Defaults have shifted repeatedly; expect visual diffs in the garment/skin PBR |
-| `LineMaterial` / `LineSegments2` | Moved and changed signature across this range |
-| `TransformControls` | API changed (notably `.getHelper()` in recent versions) |
-| WebGPU types | seamer pins `@webgpu/types` 0.1.70 independently; check for conflict |
-
-*Also fix in Phase 0:* packager's `@types/three` (0.184) is ahead of its runtime (0.181).
-Pin them together.
-
-*Contingency.* If the seamer upgrade turns out to be a multi-week project, pin **both** to
-0.170 for Phases 0–2 (which are three-free anyway — D2) and do the upgrade as a prerequisite
-to Phase 3 only. This is a legitimate fallback, not a failure.
+**Resolved.** The original audit compared legacy Packager on 0.181.2 with legacy Seamer on
+0.170.0. The current PackCAD and Seamer Studio forks both use three.js 0.181.2, as does
+Atelier's workspace lockfile. `three` is a peer dependency of the engine entry points that
+accept three.js objects, and both Vite consumers deduplicate it. `pnpm lint` runs the
+single-version lockfile assertion.
 
 ---
 
@@ -268,7 +279,7 @@ to promote something that is really app-specific.
 if a signature mentions a domain noun (piece, panel, seam, crease, avatar), it does not belong
 in a package.
 
-**R2 — `cdt2d` → `delaunator` changes packager's fold output. [RESOLVED — see outcome below]**
+**R2 — `cdt2d` → `delaunator` changes PackCAD's fold output. [RESOLVED — see outcome below]**
 
 > **Outcome (measured, not assumed).** The two triangulators **do** disagree, on 2 of the
 > MailerBox fixture's faces (8 and 15): they pick *opposite diagonals of a near-cocircular
@@ -288,31 +299,25 @@ in a package.
 > wrong reason. The mock must go through `vi.mock` + `vi.hoisted`, and the test asserts the
 > mock was actually called.
 
-Original analysis:
+Historical analysis:
 `faceDiagonals()` feeds the isometry bars that keep facets rigid in the Newton solver. A
 different triangulation gives a different constraint set, which can change the converged fold —
 subtly, and possibly only on some inputs.
-*Mitigation, do this before writing any replacement:*
-1. Add a golden-output test to packager **now**, on `cdt2d`, over every bundled fixture
-   (`model/fixtures/mailerBox.packcad.json` and the PackCAD samples): serialize final vertex
-   positions from `foldNewtonSolver` to a snapshot.
-2. Swap the library. Require the snapshots to match within solver tolerance.
-3. If they don't: keep `cdt2d` in `@atelier/geometry` as a second `triangulateFaceCDT` entry
-   point. Two triangulators is a worse outcome than one but a much better one than a silently
-   wrong fold. **Take this exit early rather than fighting it.**
+The mitigation was to compare both triangulators over PackCAD's fixture, then compare final
+solver positions rather than requiring arbitrary Delaunay diagonals to match. The permanent
+PackCAD tests above preserve both checks.
 
-**R3 — Duplicate `three` instances under `file:` links.**
+**R3 — Duplicate `three` instances under links. [MITIGATED]**
 Breaks `instanceof` in ways that produce confusing, non-local failures.
 *Mitigation:* `three` as peerDependency everywhere in Atelier + `resolve.dedupe: ['three']`
-in both apps. Add a CI assertion that `pnpm why three` reports exactly one version.
+in both current apps. The Atelier lint gate asserts one three.js version in the lockfile.
 
-**R4 — seamer's selection refactor ripples through ~30 components.**
+**R4 — Seamer Studio's selection refactor ripples through ~30 components.**
 *Mitigation:* the 2a/2b split described in Phase 2, with a shim as the escape hatch.
 
-**R5 — Visual regressions in Phase 3 that nobody notices for weeks.**
-*Mitigation:* capture reference images from both apps *before* Phase 3 starts, via
-`captureImage()` / `preserveDrawingBuffer`. Add them to CI as a perceptual diff. Do this in
-Phase 0 while it's cheap.
+**R5 — Visual regressions in viewport consumers.**
+*Mitigation:* compare current PackCAD and Seamer Studio captures with the retained legacy
+reference images when viewport behavior changes.
 
 **R6 — Two consumers is a thin basis for a general engine.**
 Genuinely true, and worth accepting consciously. The reuse-in-future-projects goal is real but
@@ -329,28 +334,23 @@ abstraction is wrong. It is the cheapest available proxy for a third consumer.
 |---|---|---|
 | Unit | every package, colocated | Node, no DOM. `core` and `geometry` must run headless (D2). |
 | Golden output | `geometry`, `io` | Snapshot fold vertices (R2) and every export format byte-for-byte. |
-| Visual | apps | Reference images captured in Phase 0, diffed in CI from Phase 3 (R5). |
-| E2E | seamer | Keep the existing Playwright suite green through every phase. It is the strongest signal available for Phase 2 and 3 regressions. |
-| Contract | `examples/minimal` | Must build and run after every phase (R6). |
+| Visual | consumer apps | Reference images compare PackCAD and Seamer Studio with the legacy oracles. |
+| Consumer | forks | Keep PackCAD and Seamer Studio's own typechecks and tests green. |
+| Contract | `examples/minimal` | Included in Atelier's root TypeScript and Vitest gates. |
 
-**Coverage floor:** no module is extracted without at least the tests it already had. Where
-packager code moves into a package, it gains tests it never had (AUDIT F7) — that is a
-deliverable of the phase, not a follow-up.
+**Coverage floor:** shared modules keep their tests, and the minimal contract remains in both
+root code gates.
 
 ---
 
 ## 7. Sequence summary
 
-| Phase | Deliverable | Risk | Apps stay shippable |
+| Phase | Deliverable | Status | Consumer |
 |---|---|---|---|
-| 0 | workspace, lint rules, three reconciliation, reference images | low | yes |
-| 1 | `@atelier/geometry` | medium (R2) | yes |
-| 2 | `@atelier/core` — **packager gains undo** | medium | yes |
-| 3 | `@atelier/viewport` | **high** | yes, if landed subsystem-by-subsystem |
-| 4 | `@atelier/io` — both apps gain formats | low | yes |
-| 5 | `@atelier/sim` | low | defer; revisit after 4 |
-| 6 | unified 2D viewport | high | not recommended |
-
-Phases 0–2 deliver most of the value at moderate risk and are worth committing to now.
-Phase 3 is where the plan should be re-evaluated with real code in hand. Phases 5 and 6 are
-options, not commitments.
+| 0 | workspace, lint rules, three reconciliation, reference images | complete | forks |
+| 1 | `@atelier/geometry` | complete | forks |
+| 2 | `@atelier/core` | complete | forks |
+| 3 | `@atelier/viewport` | complete | forks |
+| 4 | `@atelier/io` | complete | forks |
+| 5 | `@atelier/sim` | complete | Seamer Studio |
+| 6 | unified 2D viewport | not started | optional |

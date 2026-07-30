@@ -3,6 +3,7 @@ export { ResourceScope } from './resources';
 export {
   CameraRig,
   type CameraKind,
+  type CameraPreset,
   type CameraRigOptions,
   type CameraState,
   type CameraView,

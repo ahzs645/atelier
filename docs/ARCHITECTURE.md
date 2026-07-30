@@ -95,9 +95,8 @@ only two functions permitted to cross the boundary. Magic scalars like packager'
 `thicknessMm / 42` become explicit conversions during migration.
 
 Axis convention: **world is Y-up** (three.js default, matches both apps). Document space is
-2D `{x, y}`; the doc→world mapping including any Y flip lives in exactly one function
-(`docToWorld`) so it is auditable in one place. **The exact flip must be verified against
-both apps' 2D canvases during Phase 1** — it is asserted here, not yet confirmed.
+mathematical Y-up `{x, y}` and `docToWorld` performs no Y inversion; Canvas2D consumers apply
+their Y-down projection at the screen boundary.
 
 ### D6 — One triangulation library: **`delaunator` + explicit constraints.**
 
@@ -108,10 +107,11 @@ packager uses `cdt2d`, seamer uses `delaunator` (AUDIT §2.3). Choose seamer's, 
   has all of it; `cdt2d` gives constrained edges but none of the rest.
 - The engine's triangulation feeds a *simulation particle set*, which is seamer's use case.
 
-packager's `triangulateFace` is CDT over a **convex-ish single face loop with no holes and no
-interior points** — the strictly easier case. It must be reproduced on `delaunator` and
-validated against the fold solver, since `faceDiagonals()` feeds the isometry bars that keep
-facets rigid. **This is the highest-risk item in the whole extraction** (see MIGRATION R2).
+Packager's `triangulateFace` case is a single indexed face loop with no holes or interior
+points. It is implemented as a public convenience wrapper over `triangulate`, with an
+ear-clipping fallback for non-convex simple loops and index mapping back to the caller's
+global vertices. PackCAD's parity and fold-outcome tests record the two harmless diagonal
+differences from `cdt2d` (see MIGRATION R2).
 
 ### D7 — Viewport is composed of single-responsibility subsystems, not one class.
 
@@ -265,6 +265,16 @@ export interface TriMesh {
 export function triangulate(input: TriangulateInput): TriMesh
 /** Non-boundary edges of the CDT — the isometry bars for rigid-facet solvers. */
 export function meshDiagonals(mesh: TriMesh, outerLen: number): Array<[number, number]>
+/**
+ * Triangulate one indexed face loop and map every triangle back to the caller's
+ * global vertex indices. Uses `triangulate({ spacing: 0 })`; non-convex simple
+ * loops fall back to ear clipping if unconstrained Delaunay misses the boundary.
+ * Throws when a referenced vertex has no 2D coordinate.
+ */
+export function triangulateFace(
+  loop: number[],
+  coords: ReadonlyArray<ReadonlyArray<number>>
+): Array<[number, number, number]>
 
 // --- face/edge topology (from packager's FOLD utilities) --------------------
 export interface EdgeTopology {
@@ -381,7 +391,7 @@ export interface HistoryOptions {
   persistLimit?: number     // default 30 per stack
 }
 
-/** Pluggable persistence. Atelier ships an IndexedDB impl in @atelier/core/persist. */
+/** Pluggable persistence. Atelier exports an IndexedDB implementation from @atelier/core. */
 export interface HistoryPersistence<T> {
   save(docId: Id, undo: Array<HistoryEntry<T>>, redo: Array<HistoryEntry<T>>): Promise<void>
   load(docId: Id): Promise<{ undo: Array<HistoryEntry<T>>; redo: Array<HistoryEntry<T>> } | null>
@@ -398,6 +408,26 @@ export class History<T> {
   get labels(): readonly string[]
   reset(): void
   bind(docId: Id): Promise<boolean>     // restore persisted history; true if any was found
+  dispose(): void
+}
+
+// --- browser persistence ----------------------------------------------------
+/** Reactive, SSR-safe localStorage-backed value. Storage failures are best-effort. */
+export interface Persisted<T> {
+  get(): T
+  set(value: T): void
+  update(fn: (value: T) => T): void
+  subscribe(fn: (value: T) => void): () => void
+  dispose(): void
+}
+export function persisted<T>(key: string, initial: T): Persisted<T>
+
+/** IndexedDB implementation of HistoryPersistence; defaults to atelier/history, version 1. */
+export class IndexedDbHistoryPersistence<T = unknown> implements HistoryPersistence<T> {
+  constructor(opts?: { dbName?: string; storeName?: string; version?: number })
+  save(docId: Id, undo: Array<HistoryEntry<T>>, redo: Array<HistoryEntry<T>>): Promise<void>
+  load(docId: Id): Promise<{ undo: Array<HistoryEntry<T>>; redo: Array<HistoryEntry<T>> } | null>
+  delete(docId: Id): Promise<void>
   dispose(): void
 }
 
@@ -447,10 +477,20 @@ export class Transaction<T> {
   rollback(): void
 }
 
-/** Expose an editor on `globalThis` for external scripts/agents. Returns a disposer.
- *  Generalises seamer's installCommandApi / window.seamer. */
+/** Expose the generic editor API on `globalThis[name]`. Returns a disposer. */
 export function installAutomationApi<T>(editor: Editor<T>, name: string): () => void
 ```
+
+`installAutomationApi` installs `commands`, `execute`, `preview`, `beginTransaction`,
+`getDoc`, `getContent`, `getSelection`, `undo`, and `redo`. It does **not** preserve
+legacy Seamer's `window.seamer` shape by itself: that API used `getPattern` and returned
+plain selection-id arrays. Seamer Studio installs the generic surface and then adds its
+`getPattern` alias, legacy selection object, and command metadata app-side.
+
+The persistence implementations are source-organized under `packages/core/src/persist`, but
+`packages/core/package.json` currently exports only `"."`. Consumers therefore import
+`persisted`, `Persisted`, and `IndexedDbHistoryPersistence` from `@atelier/core`; the
+`@atelier/core/persist` package subpath does not currently exist.
 
 **Migration mapping**
 
@@ -463,8 +503,8 @@ export function installAutomationApi<T>(editor: Editor<T>, name: string): () => 
 | `commands/registry.ts` (~75 defs) | **stays in seamer**, re-typed against `CommandDef<Pattern>` |
 | `commands/selection.ts` `Selection` | `Selection` class; the *transforms* stay in seamer (Pattern-typed) |
 | `stores/pattern.ts` undo/redo/coalesce | `History<T>` |
-| `stores/localDB.ts` `saveHistory`/`loadHistory` | `IndexedDbHistoryPersistence` in `@atelier/core/persist` |
-| `stores/pattern.ts` `persisted<T>()` | `@atelier/core/persist` `persisted<T>()` — SSR-guarded, framework-free |
+| `stores/localDB.ts` `saveHistory`/`loadHistory` | `IndexedDbHistoryPersistence`, exported from `@atelier/core` |
+| `stores/pattern.ts` `persisted<T>()` | `@atelier/core` `persisted<T>()` — SSR-guarded, framework-free |
 
 **packager mapping:** `model/operationPipeline.ts` (10 mutators) and `model/editorMutations.ts`
 become `CommandDef<PackagingContent>[]`. Signatures already match the reducer shape
@@ -853,7 +893,14 @@ export interface Drawing {
   boundsMm: Bounds2
 }
 
-// vector out
+// neutral drawing inspection
+export function collectPolylines(d: Drawing): DrawingPoly[]
+export function drawingBoundsMm(d: Drawing): Bounds2 & { width: number; height: number }
+/** Compatibility alias; it also accepts the neutral Drawing type. */
+export const patternBoundsMm: typeof drawingBoundsMm
+export const TILE_OVERLAP_MM = 6
+
+// vector and PDF out
 export function toSVG(d: Drawing, opts?: SvgOptions): string
 export function toDXF(d: Drawing): string
 export function toHPGL(d: Drawing, opts?: HpglOptions): string
@@ -870,11 +917,46 @@ export function fromSVG(svg: string, opts?: { unit?: 'mm' | 'px'; dpi?: number }
 export function fromDXF(text: string): Drawing
 export function fromHPGL(text: string): Polyline[]
 
-// 3D
+// machine cut files
+export type CutFileFormat = 'hpgl' | 'cut' | 'svg'
+export interface CuttingMachine {
+  id: string
+  name: string
+  format: CutFileFormat
+  bedWidthMm: number
+  bedLengthMm: number
+  marginMm: number
+  speed?: number
+}
+export interface CutFilePart { text: string; partLabel: string }
+export interface CutFileResult {
+  files: CutFilePart[]
+  extension: string
+  mime: string
+  warnings: string[]
+}
+export function machineUsableWidthMm(machine: CuttingMachine): number
+export function machineUsableLengthMm(machine: CuttingMachine): number
+export function markerToCutFile(d: Drawing, machine: CuttingMachine): CutFileResult
+
+// browser-only: @atelier/io/browser
+export function downloadBlob(filename: string, blob: Blob): void
+export function downloadText(filename: string, text: string, mime?: string): void
+export function toPNG(d: Drawing, maxPx?: number, marginPx?: number): Promise<Blob | null>
+export function printDrawing(d: Drawing, title?: string): void
+export function printTiled(d: Drawing, opts?: TileOpts): void
+
+// three-dependent: @atelier/io/three
 export function toGLTF(scene: THREE.Object3D, opts?: { binary?: boolean }): Promise<ArrayBuffer | object>
 export function toOBJ(scene: THREE.Object3D): string
 export function toSTL(scene: THREE.Object3D, opts?: { binary?: boolean }): ArrayBuffer | string
 ```
+
+Every app-owned flattener supplies `Drawing.boundsMm`, layer styles, document-millimetre
+polylines, and text. `markerToCutFile` translates that neutral drawing into machine
+coordinates, warns when the usable bed width is exceeded, splits whole polylines into
+multiple files when the bed length is exceeded, and emits HPGL, `.cut`, or SVG. Closed
+polylines are cutting contours in `.cut`; open polylines remain available in HPGL/SVG.
 
 > `toGLTF`/`toOBJ`/`toSTL` take a `THREE.Object3D`, which would make `io` depend on `three`
 > and violate §3. **Resolution:** they live in a separate `@atelier/io/three` entry point
@@ -1029,7 +1111,7 @@ atelier/
   pnpm-workspace.yaml
   tsconfig.base.json
   eslint.config.js             # incl. dependency-rule enforcement (§3)
-  vitest.workspace.ts
+  vitest.config.ts
   docs/{ARCHITECTURE,MIGRATION,AUDIT}.md
   packages/
     geometry/  core/  viewport/  io/  sim/  react/  svelte/
@@ -1037,18 +1119,16 @@ atelier/
     minimal/                   # smallest app that proves the API: doc + 2 commands + viewport
 ```
 
-Each package: `src/`, `src/index.ts` (the only public surface), `package.json` with
-`exports` map, colocated `*.test.ts`. Build with `tsc` to ESM + `.d.ts` — no bundler for
-libraries; apps bundle.
+Each package has `src/`, a `package.json` exports map, and colocated `*.test.ts`. Most expose
+`src/index.ts`; `@atelier/io` also has explicit `/browser` and `/three` entry points. Build
+with `tsc` to ESM + `.d.ts` — no bundler for libraries; apps bundle.
 
 **Versioning:** all packages share one version, released together. Independent versioning is
 not worth the coordination cost at two consumers.
 
 ---
 
-## 7. Open questions
-
-Flagged rather than guessed. None block starting Phase 0.
+## 7. Open and resolved questions
 
 1. ~~**Document Y-axis direction** (D5).~~ **RESOLVED during implementation.** Document space is
    mathematical **Y-up, with no inversion in `docToWorld`**. Evidence: seamer's
@@ -1057,17 +1137,17 @@ Flagged rather than guessed. None block starting Phase 0.
    packager's flat projection negates its depth axis to compensate for the top-down camera's
    screen inversion — that is projection-specific, not a document convention (its folded-3D path
    uses the positive sign). See `packages/viewport/src/units.ts` and its tests.
-2. **`delaunator` parity for packager's fold facets** (D6). The single highest-risk item;
-   see MIGRATION R2 for the mitigation.
+2. ~~**`delaunator` parity for PackCAD's fold facets** (D6).~~ **RESOLVED.** Two
+   near-cocircular faces choose the opposite valid diagonal; PackCAD's solver output remains
+   unchanged within tolerance. See MIGRATION R2.
 3. **Layers.** seamer has a first-class `Layer` model with style/lock/visibility; packager has
    none. Layers are arguably core, not app. Deferred: layers stay in seamer's content type for
    now; promote to `@atelier/core` only if packager grows a real need.
 4. **Grading and alterations.** seamer's `GradingProfile`/`AlterationTrack` are a *parametric
    variation* system that is conceptually general (a packaging line has size runs too). Not
    designed here. Revisit after Phase 4.
-5. **Does packager still need R3F?** After Phase 3, packager could keep a thin R3F adapter that
-   constructs the same objects, or drop React-Three entirely and use `@atelier/react`'s
-   `ViewportCanvas`. Decide with the code in front of you, not now.
+5. ~~**Does PackCAD still need R3F?**~~ **RESOLVED.** PackCAD uses
+   `@atelier/react`'s `ViewportCanvas` and app-owned imperative scene construction.
 6. **Publishing.** Private registry, GitHub Packages, or git dependency? See MIGRATION §2 —
    affects nothing before Phase 1 ships.
 7. ~~**Ambient occlusion: `GTAOPass` vs `n8ao`.**~~ **RESOLVED from Phase 3 consumer

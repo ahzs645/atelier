@@ -11,4 +11,27 @@ export type {
   SolverHandle,
   SolverPlugin,
 } from "./runner";
-
+export {
+  createSolveHost,
+  SolveHostDisposed,
+  SolveSuperseded,
+} from "./steady";
+export type {
+  SolveHost,
+  SolveHostOptions,
+  SolvePluginHostOptions,
+  SteadySolverPlugin,
+  SteadySolverSession,
+} from "./steady";
+export {
+  createWorkerSteadySolverPlugin,
+  serveSteadySolverPlugin,
+} from "./worker";
+export type {
+  ServeSteadySolverOptions,
+  SolveWorker,
+  SolveWorkerClientMessage,
+  SolveWorkerScope,
+  SolveWorkerServerMessage,
+  WorkerSteadySolverPluginOptions,
+} from "./worker";

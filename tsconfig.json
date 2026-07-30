@@ -7,6 +7,7 @@
     { "path": "packages/io" },
     { "path": "packages/sim" },
     { "path": "packages/react" },
-    { "path": "packages/svelte" }
+    { "path": "packages/svelte" },
+    { "path": "examples/minimal" }
   ]
 }
