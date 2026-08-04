@@ -195,6 +195,54 @@ describe("format import and round-trip", () => {
       maxY: -0,
     });
   });
+
+  it("leaves curve segments off unless they are asked for", () => {
+    const svg = '<svg width="20mm" height="10mm" viewBox="0 0 20 10"><path d="M0,0 C0,5 20,5 20,10"/></svg>';
+    expect(fromSVG(svg).polys[0].segments).toBeUndefined();
+  });
+
+  it("reports authored cubic control points when preserving curves", () => {
+    const imported = fromSVG(
+      '<svg width="20mm" height="10mm" viewBox="0 0 20 10"><path d="M0,0 C0,5 20,5 20,10"/></svg>',
+      { preserveCurves: true },
+    );
+    const poly = imported.polys[0];
+    // pts is still the flattened polyline, unchanged by the option
+    expect(poly.pts.length).toBeGreaterThan(2);
+    expect(poly.segments).toHaveLength(1);
+    const segment = poly.segments?.[0];
+    if (segment?.kind !== "cubic") throw new Error("expected a cubic segment");
+    // control points survive, in the drawing's own y-up coordinates
+    expect(segment.c0.x).toBeCloseTo(0, 6);
+    expect(segment.c0.y).toBeCloseTo(-5, 6);
+    expect(segment.c1.x).toBeCloseTo(20, 6);
+    expect(segment.c1.y).toBeCloseTo(-5, 6);
+    expect(segment.to.x).toBeCloseTo(20, 6);
+    expect(segment.to.y).toBeCloseTo(-10, 6);
+    // and the span really is the one pts was flattened from
+    expect(poly.pts[0].x).toBeCloseTo(0, 6);
+    expect(poly.pts[poly.pts.length - 1].x).toBeCloseTo(segment.to.x, 6);
+    expect(poly.pts[poly.pts.length - 1].y).toBeCloseTo(segment.to.y, 6);
+  });
+
+  it("describes straight geometry as line segments so consumers need no fallback", () => {
+    const imported = fromSVG(
+      '<svg width="20mm" height="10mm" viewBox="0 0 20 10"><polygon points="0,0 20,0 20,10"/></svg>',
+      { preserveCurves: true },
+    );
+    const poly = imported.polys[0];
+    // three corners, closed: two spans between them plus the closing span
+    expect(poly.segments?.map((segment) => segment.kind)).toEqual(["line", "line", "line"]);
+    expect(poly.segments?.[2].to.x).toBeCloseTo(poly.pts[0].x, 6);
+    expect(poly.segments?.[2].to.y).toBeCloseTo(poly.pts[0].y, 6);
+  });
+
+  it("honours a coarser curve tolerance", () => {
+    const svg = '<svg width="20mm" height="10mm" viewBox="0 0 20 10"><path d="M0,0 C0,5 20,5 20,10"/></svg>';
+    const fine = fromSVG(svg, { curveToleranceMm: 0.05 }).polys[0].pts.length;
+    const coarse = fromSVG(svg, { curveToleranceMm: 4 }).polys[0].pts.length;
+    expect(coarse).toBeLessThan(fine);
+  });
 });
 
 describe("PDF tiling", () => {

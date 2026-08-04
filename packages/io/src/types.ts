@@ -13,10 +13,27 @@ export interface DrawingLayer {
   style?: LineStyle;
 }
 
+/**
+ * One authored span of a path, in the drawing's own coordinates. `cubic` keeps
+ * the two Bezier control points the SVG was written with, so a consumer that
+ * needs the curve itself -- rather than a polyline approximation of it -- can
+ * discretise on its own terms.
+ */
+export type DrawingSegment =
+  | { kind: "line"; to: Vec2 }
+  | { kind: "cubic"; c0: Vec2; c1: Vec2; to: Vec2 };
+
 export interface DrawingPoly {
   pts: Polyline;
   closed: boolean;
   layer: string;
+  /**
+   * The spans `pts` was flattened from, starting at `pts[0]`; present only when
+   * `fromSVG` is asked to preserve curves. A closed poly's final segment
+   * returns to `pts[0]`. Straight geometry (line/polyline/polygon/rect) yields
+   * all-`line` segments, so consumers never have to special-case its absence.
+   */
+  segments?: DrawingSegment[];
 }
 
 export interface DrawingText {

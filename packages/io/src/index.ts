@@ -9,6 +9,7 @@ export type {
   Drawing,
   DrawingLayer,
   DrawingPoly,
+  DrawingSegment,
   DrawingText,
   HpglOptions,
   LineStyle,

@@ -9,6 +9,7 @@ import {
 import type {
   Drawing,
   DrawingPoly,
+  DrawingSegment,
   DrawingText,
   LineStyle,
   SvgOptions,
@@ -219,6 +220,37 @@ function flattenPath(path: ParsedPath, tolerance: number): Polyline {
   return points;
 }
 
+/** The authored spans of a path, un-flattened, mirroring `flattenPath`'s walk. */
+function pathSegments(path: ParsedPath): DrawingSegment[] {
+  if (path.vertices.length === 0) return [];
+  const segments: DrawingSegment[] = [];
+  const segmentCount = path.closed
+    ? path.vertices.length
+    : path.vertices.length - 1;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const from = path.vertices[index];
+    const to = path.vertices[(index + 1) % path.vertices.length];
+    if (from.outgoing || to.incoming) {
+      segments.push({
+        kind: "cubic",
+        c0: from.outgoing ?? from.point,
+        c1: to.incoming ?? to.point,
+        to: to.point,
+      });
+    } else {
+      segments.push({ kind: "line", to: to.point });
+    }
+  }
+  return segments;
+}
+
+/** Straight geometry described as segments, so `segments` is always populated. */
+function lineSegments(points: Polyline, closed: boolean): DrawingSegment[] {
+  const segments: DrawingSegment[] = points.slice(1).map((to): DrawingSegment => ({ kind: "line", to }));
+  if (closed && points.length > 2) segments.push({ kind: "line", to: points[0] });
+  return segments;
+}
+
 function attributes(source: string): Map<string, string> {
   const result = new Map<string, string>();
   const expression = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
@@ -282,7 +314,18 @@ function styleFromAttributes(attrs: ReadonlyMap<string, string>): LineStyle | nu
 
 export function fromSVG(
   svg: string,
-  opts: { unit?: "mm" | "px"; dpi?: number } = {},
+  opts: {
+    unit?: "mm" | "px";
+    dpi?: number;
+    /**
+     * Also report each poly's authored spans on `DrawingPoly.segments`, keeping
+     * the Bezier control points instead of only the flattened `pts`. Off by
+     * default: callers that just want polylines are unaffected.
+     */
+    preserveCurves?: boolean;
+    /** Max chord deviation when flattening curves into `pts`, in mm. Default 0.25. */
+    curveToleranceMm?: number;
+  } = {},
 ): Drawing {
   const dpi = opts.dpi ?? 96;
   const root = /<svg\b([^>]*)>/i.exec(svg);
@@ -310,16 +353,25 @@ export function fromSVG(
   const styles = new Map<string, LineStyle>();
   const names = new Map<string, string>();
   let automaticLayer = 0;
+  const convertSegment = (segment: DrawingSegment): DrawingSegment =>
+    segment.kind === "cubic"
+      ? { kind: "cubic", c0: convert(segment.c0), c1: convert(segment.c1), to: convert(segment.to) }
+      : { kind: "line", to: convert(segment.to) };
   const add = (
     points: Polyline,
     closed: boolean,
     attrs: ReadonlyMap<string, string>,
+    segments?: DrawingSegment[],
   ): void => {
     if (points.length < 2) return;
     const layer = attrs.get("data-layer")
       ?? attrs.get("id")
       ?? `svg-${automaticLayer++}`;
-    polys.push({ pts: points.map(convert), closed, layer });
+    const poly: DrawingPoly = { pts: points.map(convert), closed, layer };
+    if (opts.preserveCurves) {
+      poly.segments = (segments ?? lineSegments(points, closed)).map(convertSegment);
+    }
+    polys.push(poly);
     const style = styleFromAttributes(attrs);
     if (style && !styles.has(layer)) styles.set(layer, style);
     names.set(layer, layer);
@@ -330,8 +382,9 @@ export function fromSVG(
     const tag = match[1].toLowerCase();
     const attrs = attributes(match[2]);
     if (tag === "path") {
+      const tolerance = (opts.curveToleranceMm ?? 0.25) / Math.max(scaleX, scaleY);
       for (const path of parsePathData(attrs.get("d") ?? "")) {
-        add(flattenPath(path, 0.25 / Math.max(scaleX, scaleY)), path.closed, attrs);
+        add(flattenPath(path, tolerance), path.closed, attrs, pathSegments(path));
       }
     } else if (tag === "polygon" || tag === "polyline") {
       add(parsePoints(attrs.get("points") ?? ""), tag === "polygon", attrs);
