@@ -242,6 +242,11 @@ describe('prepareStudioScene', () => {
     expect((floor.material as THREE.MeshStandardMaterial).color.getHexString()).toBe('abcdef');
     expect((scene.background as THREE.Color).getHexString()).toBe('112233');
     expect(key.intensity).toBe(6);
+    const keyAzimuth = THREE.MathUtils.radToDeg(Math.atan2(
+      key.position.x - studio.target.x,
+      key.position.z - studio.target.z,
+    ));
+    expect(keyAzimuth).toBeCloseTo(-85, 5);
     expect((studio.camera as THREE.PerspectiveCamera).fov).toBe(25);
     const modelRadius = Math.sqrt(3) / 2;
     const expectedDistance = modelRadius * 1.05

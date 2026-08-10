@@ -602,6 +602,7 @@ export function prepareStudioScene(
     Math.sin(elevation),
     horizontal * Math.cos(azimuth),
   );
+  const cameraAzimuthDegrees = THREE.MathUtils.radToDeg(azimuth);
   if (!cameraOverride) {
     const halfFov = THREE.MathUtils.degToRad(fov) / 2;
     const distance = radius * fillRatio / Math.sin(halfFov);
@@ -642,7 +643,11 @@ export function prepareStudioScene(
     3.5 * radius,
   );
   key.name = 'Atelier studio key';
-  key.position.copy(lightPosition(settings.keyAngle + 180, 35, 3.4));
+  key.position.copy(lightPosition(
+    cameraAzimuthDegrees + settings.keyAngle,
+    35,
+    3.4,
+  ));
   key.lookAt(center);
   const fill = new THREE.RectAreaLight(
     '#fefefe',
@@ -654,7 +659,11 @@ export function prepareStudioScene(
   const fillAngle = (): number => settings.keyAngle >= 0
     ? settings.keyAngle - 90
     : settings.keyAngle + 90;
-  fill.position.copy(lightPosition(fillAngle() + 180, 18, 6.7));
+  fill.position.copy(lightPosition(
+    cameraAzimuthDegrees + fillAngle(),
+    18,
+    6.7,
+  ));
   fill.lookAt(center);
   scene.add(key, fill);
 
@@ -769,13 +778,25 @@ export function prepareStudioScene(
     key.intensity = rasterShadows
       ? settings.keyIntensity * 0.65
       : settings.keyIntensity;
-    key.position.copy(lightPosition(settings.keyAngle + 180, 35, 3.4));
+    key.position.copy(lightPosition(
+      cameraAzimuthDegrees + settings.keyAngle,
+      35,
+      3.4,
+    ));
     key.lookAt(center);
     fill.intensity = settings.fillIntensity;
-    fill.position.copy(lightPosition(fillAngle() + 180, 18, 6.7));
+    fill.position.copy(lightPosition(
+      cameraAzimuthDegrees + fillAngle(),
+      18,
+      6.7,
+    ));
     fill.lookAt(center);
     previewShadow.intensity = rasterShadows ? settings.keyIntensity * 0.35 : 0;
-    previewShadow.position.copy(lightPosition(settings.keyAngle + 180, 35, 5));
+    previewShadow.position.copy(lightPosition(
+      cameraAzimuthDegrees + settings.keyAngle,
+      35,
+      5,
+    ));
     previewShadow.target.updateMatrixWorld();
     floor.visible = settings.floorVisible;
     floorMaterial.color.set(settings.floorColor);
