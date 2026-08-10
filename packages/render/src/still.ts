@@ -652,7 +652,7 @@ export function prepareStudioScene(
   // Keep the receiver just below the lowest board surface. The previous 1.5%
   // radius gap was large enough to detach the raster shadow and make the model
   // appear to float at live-preview scale.
-  floor.position.set(center.x, bounds.min.y - radius * 0.002, center.z);
+  floor.position.set(center.x, bounds.min.y - radius * 0.00075, center.z);
   floor.receiveShadow = true;
   scene.add(floor);
 
@@ -686,7 +686,10 @@ export function prepareStudioScene(
   contactShadow.name = 'Atelier studio contact shadow';
   const contactShadowGeometries: THREE.BufferGeometry[] = [];
   const contactShadowMaterials: THREE.Material[] = [];
-  const contactShadowLayers = [{ x: 0.9, z: 0.56 }];
+  // Give the decal enough depth to overlap the package's support footprint in
+  // perspective. A narrow ellipse projects below the front edge and reads as
+  // a detached shadow even when it is physically on the same ground plane.
+  const contactShadowLayers = [{ x: 0.9, z: 0.82 }];
   contactShadowLayers.forEach((layer, index) => {
     const geometry = new THREE.CircleGeometry(1, 64);
     const position = geometry.getAttribute('position');
@@ -761,7 +764,7 @@ export function prepareStudioScene(
       groundCenter.x,
       // Above the receiver, but still below the lowest model vertex. This
       // prevents the decal from clipping through the cardboard while orbiting.
-      floor.position.y + radius * 0.0005,
+      floor.position.y + radius * 0.00025,
       groundCenter.z,
     );
     contactShadow.visible = rasterShadows && settings.floorVisible;
