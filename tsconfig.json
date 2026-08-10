@@ -4,6 +4,7 @@
     { "path": "packages/geometry" },
     { "path": "packages/core" },
     { "path": "packages/viewport" },
+    { "path": "packages/render" },
     { "path": "packages/io" },
     { "path": "packages/sim" },
     { "path": "packages/react" },

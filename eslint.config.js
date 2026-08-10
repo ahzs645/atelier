@@ -44,6 +44,7 @@ const noFrameworksInEngine = {
     "packages/geometry/**/*.ts",
     "packages/core/**/*.ts",
     "packages/viewport/**/*.ts",
+    "packages/render/**/*.ts",
     "packages/io/**/*.ts",
     "packages/sim/**/*.ts",
   ],

@@ -1,12 +1,12 @@
 # Atelier
 
 A framework-agnostic **CAD editor runtime** for applications that turn flat 2D geometry into
-3D form. It provides the shared document, geometry, viewport, I/O, simulation-host, and
-framework-binding layers while leaving each application's domain solver and UI app-owned.
+3D form. It provides the shared document, geometry, viewport, still-rendering, I/O,
+simulation-host, and framework-binding layers while leaving each application's domain solver
+and UI app-owned.
 
-> **Status: implemented and in use.** All seven packages are implemented. The package suites
-> contain 126 passing tests, and the gated `examples/minimal` contract test brings the workspace
-> total to 127. PackCAD (React packaging CAD) and Seamer Studio (Svelte sewing-pattern CAD)
+> **Status: implemented and in use.** All eight packages are implemented and covered by the
+> workspace checks. PackCAD (React packaging CAD) and Seamer Studio (Svelte sewing-pattern CAD)
 > consume Atelier through local `link:` dependencies. The original `packager` and `seamer`
 > repositories remain untouched
 > reference implementations; see [`docs/MIGRATION.md`](docs/MIGRATION.md).
@@ -18,6 +18,7 @@ framework-binding layers while leaving each application's domain solver and UI a
 | `@atelier/geometry` | Pure 2D math, curves, polygon operations, triangulation, topology, nesting, and warping. |
 | `@atelier/core` | Typed documents, commands, transactions, selection, undo/redo history, persistence, and automation. |
 | `@atelier/viewport` | Imperative three.js viewport with cameras, lighting, post-processing, picking, overlays, gizmos, and resource ownership. |
+| `@atelier/render` | Progressive path-traced still rendering with cancellation, progress, PNG output, and a locally bundled denoiser. |
 | `@atelier/io` | Neutral `Drawing` import/export, PDF and cut-file output, plus browser and three.js entry points. |
 | `@atelier/sim` | Solver lifecycle and shared WebGPU device acquisition for app-owned solvers. |
 | `@atelier/react` | React hooks and a `ViewportCanvas` binding. |

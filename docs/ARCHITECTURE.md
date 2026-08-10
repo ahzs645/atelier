@@ -4,7 +4,7 @@ Design document and living reference for the implemented engine. It defines pack
 public APIs, type contracts, and the decisions behind them. Read [`AUDIT.md`](AUDIT.md) first
 for the evidence that motivated it.
 
-> **Status.** All seven packages are implemented and consumed by two apps (`packcad`,
+> **Status.** All eight packages are implemented and consumed by two apps (`packcad`,
 > `seamer-studio`). Where implementation resolved an open question, the answer is recorded
 > inline — see §7. This file is kept in sync with the code, not aspirational.
 
@@ -22,6 +22,7 @@ for the evidence that motivated it.
 | Selection | typed multi-kind selection + batch affine transforms |
 | 2D geometry | Vec2, polylines, béziers, offsets, boolean-free polygon ops, triangulation |
 | Viewport | three.js runtime: camera rig, controls, lighting/IBL, post FX, picking, gizmos, overlays, disposal |
+| Still rendering | progressive path tracing, cancellation/progress, PNG encoding, local denoising |
 | I/O | SVG, DXF, HPGL, PDF (tiled), PNG, glTF, OBJ, STL |
 | Solver host | lifecycle + WebGPU device management for pluggable solvers |
 
@@ -162,6 +163,10 @@ is what makes the engine testable and safe under SvelteKit SSR (seamer already g
 ┌────▼─────┐    ┌──────▼────┐
 │ /react   │    │ /svelte   │      thin bindings
 └──────────┘    └───────────┘
+
+     ┌────────────────┐
+     │@atelier/render │      three.js scene + camera in, PNG still out
+     └────────────────┘
 ```
 
 **Dependency rules (CI-enforced):**
@@ -171,6 +176,7 @@ is what makes the engine testable and safe under SvelteKit SSR (seamer already g
 | `geometry` | nothing | everything |
 | `core` | `geometry` | `three`, DOM, any app |
 | `viewport` | `core`, `geometry`, `three` | `react`, `svelte`, any app |
+| `render` | `three`, path tracer, denoiser, DOM | frameworks, any app |
 | `io` | `core`, `geometry` | `viewport`, frameworks |
 | `sim` | `core`, `geometry` | `viewport`, frameworks |
 | `react` / `svelte` | `viewport`, `core`, `geometry` | each other |
@@ -1053,6 +1059,19 @@ export function editorState<T>(editor: Editor<T>): {
 
 ---
 
+### 4.7 `@atelier/render`
+
+An opt-in still-rendering package that consumes a normal three.js `Scene` and `Camera`.
+`renderStill` clones and sanitizes the live scene, renders progressive samples in a dedicated
+WebGL renderer, optionally denoises the image with a locally bundled model, and returns a PNG
+`Blob`. It reports preparation, sampling, and denoising progress and accepts an `AbortSignal`.
+The package owns no UI and does not mutate the interactive `@atelier/viewport` renderer.
+
+The first implementation uses the color-only denoiser model. Albedo and normal auxiliary
+buffers can be added later without changing the app-facing `renderStill` contract.
+
+---
+
 ## 5. Cross-cutting contracts
 
 ### 5.1 Coordinate spaces
@@ -1114,7 +1133,7 @@ atelier/
   vitest.config.ts
   docs/{ARCHITECTURE,MIGRATION,AUDIT}.md
   packages/
-    geometry/  core/  viewport/  io/  sim/  react/  svelte/
+    geometry/  core/  viewport/  render/  io/  sim/  react/  svelte/
   examples/
     minimal/                   # smallest app that proves the API: doc + 2 commands + viewport
 ```

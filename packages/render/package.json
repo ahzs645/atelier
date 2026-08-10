@@ -1,0 +1,30 @@
+{
+  "name": "@atelier/render",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "denoiser": "0.0.11",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.14",
+    "xatlas-web": "0.1.0"
+  },
+  "peerDependencies": {
+    "three": ">=0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.1",
+    "three": "^0.181.2"
+  }
+}
