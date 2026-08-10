@@ -455,11 +455,14 @@ function studioEnvironment(): THREE.DataTexture {
   const width = 128;
   const height = 64;
   const data = new Float32Array(width * height * 4);
-  const top = new THREE.Color('#eef4ff');
-  const bottom = new THREE.Color('#fefefe');
+  // These are the neutral studio-gradient values used by PackCAD's source
+  // renderer. Keeping the IBL gray is important: a near-white environment
+  // lifts every shadow and washes the cardboard texture out at exposure 0.6.
+  const top = new THREE.Color('#dadad6');
+  const bottom = new THREE.Color('#9a9a96');
   const color = new THREE.Color();
   for (let y = 0; y < height; y += 1) {
-    const mix = Math.pow(y / (height - 1), 1.7);
+    const mix = Math.pow(y / (height - 1), 0.8);
     color.copy(top).lerp(bottom, mix);
     for (let x = 0; x < width; x += 1) {
       const offset = (y * width + x) * 4;
@@ -483,6 +486,57 @@ function studioEnvironment(): THREE.DataTexture {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+/** Build the source renderer's broad, curved cyclorama in model-radius units. */
+function studioSweepGeometry(radius: number): THREE.BufferGeometry {
+  const halfWidth = radius * 40;
+  const floorFront = -radius * 28;
+  const bendStart = radius;
+  const bendRadius = radius * 5;
+  const bendAngle = THREE.MathUtils.degToRad(45);
+  const wallLength = radius * 50;
+  const bendSegments = 24;
+  const profile: Array<{ y: number; z: number }> = [
+    { y: 0, z: floorFront },
+    { y: 0, z: bendStart },
+  ];
+  for (let segment = 1; segment <= bendSegments; segment += 1) {
+    const angle = bendAngle * (segment / bendSegments);
+    profile.push({
+      y: bendRadius * (1 - Math.cos(angle)),
+      z: bendStart + bendRadius * Math.sin(angle),
+    });
+  }
+  const bendTip = profile[profile.length - 1];
+  profile.push({
+    y: bendTip.y + wallLength * Math.sin(bendAngle),
+    z: bendTip.z + wallLength * Math.cos(bendAngle),
+  });
+
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  profile.forEach((point, index) => {
+    const v = index / (profile.length - 1);
+    positions.push(-halfWidth, point.y, point.z, halfWidth, point.y, point.z);
+    uvs.push(0, v, 1, v);
+  });
+  for (let index = 0; index < profile.length - 1; index += 1) {
+    const left = index * 2;
+    const right = left + 1;
+    const nextLeft = left + 2;
+    const nextRight = left + 3;
+    indices.push(left, nextRight, right, left, nextLeft, nextRight);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function resolveStudioSettings(
@@ -528,9 +582,10 @@ export function prepareStudioScene(
   // should be deterministic even when the editor is currently in 2D or its
   // last 3D orbit was left behind the package.
   const fov = settings.fov;
-  // Box fitting and the reference worker's sphere fitting express padding in
-  // opposite ways. This value matches the reference's visible 1.05 framing.
-  const fillRatio = 0.85;
+  // The source renderer frames a normalized bounding sphere at 1.05 radii.
+  // Using the previous box projection with a 0.85 multiplier made the base
+  // clip out of the final still even though the live composition looked close.
+  const fillRatio = 1.05;
   const camera = cameraOverride
     ? cloneCameraForAspect(cameraOverride, aspect)
     : new THREE.PerspectiveCamera(
@@ -548,32 +603,13 @@ export function prepareStudioScene(
     horizontal * Math.cos(azimuth),
   );
   if (!cameraOverride) {
-    camera.position.copy(center).addScaledVector(direction, radius * 10);
-    camera.lookAt(center);
-    camera.updateMatrixWorld(true);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-    const tanVertical = Math.tan(THREE.MathUtils.degToRad(fov) / 2);
-    const tanHorizontal = tanVertical * aspect;
-    let distance = radius;
-    for (const x of [bounds.min.x, bounds.max.x]) {
-      for (const y of [bounds.min.y, bounds.max.y]) {
-        for (const z of [bounds.min.z, bounds.max.z]) {
-          const relative = new THREE.Vector3(x, y, z).sub(center);
-          distance = Math.max(
-            distance,
-            relative.dot(direction) + fillRatio * Math.max(
-              Math.abs(relative.dot(right)) / tanHorizontal,
-              Math.abs(relative.dot(up)) / tanVertical,
-            ),
-          );
-        }
-      }
-    }
+    const halfFov = THREE.MathUtils.degToRad(fov) / 2;
+    const distance = radius * fillRatio / Math.sin(halfFov);
     camera.position.copy(center).addScaledVector(direction, distance);
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
-    perspectiveCamera.near = Math.max(distance - radius * 2, radius * 1e-3);
-    perspectiveCamera.far = distance + radius * 4;
+    perspectiveCamera.near = Math.max(distance * 0.05, radius * 0.01);
+    // The physical sweep extends well behind the model.
+    perspectiveCamera.far = distance + radius * 80;
     camera.lookAt(center);
     perspectiveCamera.updateProjectionMatrix();
     camera.updateMatrixWorld(true);
@@ -606,7 +642,7 @@ export function prepareStudioScene(
     3.5 * radius,
   );
   key.name = 'Atelier studio key';
-  key.position.copy(lightPosition(settings.keyAngle, 35, 3.4));
+  key.position.copy(lightPosition(settings.keyAngle + 180, 35, 3.4));
   key.lookAt(center);
   const fill = new THREE.RectAreaLight(
     '#fefefe',
@@ -615,7 +651,10 @@ export function prepareStudioScene(
     5.6 * radius,
   );
   fill.name = 'Atelier studio fill';
-  fill.position.copy(lightPosition(-30, 18, 6.7));
+  const fillAngle = (): number => settings.keyAngle >= 0
+    ? settings.keyAngle - 90
+    : settings.keyAngle + 90;
+  fill.position.copy(lightPosition(fillAngle() + 180, 18, 6.7));
   fill.lookAt(center);
   scene.add(key, fill);
 
@@ -639,7 +678,7 @@ export function prepareStudioScene(
   previewShadow.shadow.normalBias = radius * 0.00015;
   if (rasterShadows) scene.add(shadowTarget, previewShadow);
 
-  const floorGeometry = new THREE.PlaneGeometry(radius * 12, radius * 12);
+  const floorGeometry = studioSweepGeometry(radius);
   const floorMaterial = new THREE.MeshStandardMaterial({
     color: settings.floorColor,
     metalness: 0,
@@ -648,33 +687,12 @@ export function prepareStudioScene(
   });
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
   floor.name = 'Atelier studio sweep';
-  floor.rotation.x = -Math.PI / 2;
-  // Keep the receiver just below the lowest board surface. The previous 1.5%
-  // radius gap was large enough to detach the raster shadow and make the model
-  // appear to float at live-preview scale.
+  // The reference points the cyclorama away from the camera. Our imported
+  // PackCAD graph uses the opposite horizontal convention, hence the extra PI.
+  floor.rotation.y = azimuth + Math.PI;
   floor.position.set(center.x, bounds.min.y - radius * 0.00075, center.z);
   floor.receiveShadow = true;
   scene.add(floor);
-
-  // The path tracer does not reliably composite a plain Scene.background on
-  // every low-sample tile. A large emissive studio shell gives primary rays a
-  // real, deterministic backdrop while the floor remains the contact surface.
-  // This also produces the reference preview's soft gray room instead of a
-  // black strip above the finite floor.
-  const backdropGeometry = new THREE.SphereGeometry(radius * 30, 48, 24);
-  const backdropMaterial = new THREE.MeshStandardMaterial({
-    color: settings.backgroundColor,
-    emissive: settings.backgroundColor,
-    emissiveIntensity: 0.45,
-    metalness: 0,
-    roughness: 1,
-    side: THREE.BackSide,
-  });
-  const backdrop = new THREE.Mesh(backdropGeometry, backdropMaterial);
-  backdrop.name = 'Atelier studio backdrop';
-  backdrop.position.copy(center);
-  backdrop.receiveShadow = false;
-  scene.add(backdrop);
 
   // The source preview supplements its raster lighting with a soft contact
   // shadow. RectAreaLight has no WebGL shadow map, so use a single transparent
@@ -731,7 +749,6 @@ export function prepareStudioScene(
       if (
         object instanceof THREE.Mesh
         && object !== floor
-        && object !== backdrop
         && object.parent !== contactShadow
       ) {
         object.castShadow = true;
@@ -741,7 +758,7 @@ export function prepareStudioScene(
 
   const environment = studioEnvironment();
   scene.environment = environment;
-  scene.environmentIntensity = settings.ambientIntensity * 4;
+  scene.environmentIntensity = settings.ambientIntensity;
   scene.background = new THREE.Color(settings.backgroundColor);
 
   const update = (next: Partial<StillStudioSettings>): void => {
@@ -752,11 +769,13 @@ export function prepareStudioScene(
     key.intensity = rasterShadows
       ? settings.keyIntensity * 0.65
       : settings.keyIntensity;
-    key.position.copy(lightPosition(settings.keyAngle, 35, 3.4));
+    key.position.copy(lightPosition(settings.keyAngle + 180, 35, 3.4));
     key.lookAt(center);
     fill.intensity = settings.fillIntensity;
+    fill.position.copy(lightPosition(fillAngle() + 180, 18, 6.7));
+    fill.lookAt(center);
     previewShadow.intensity = rasterShadows ? settings.keyIntensity * 0.35 : 0;
-    previewShadow.position.copy(lightPosition(settings.keyAngle, 35, 5));
+    previewShadow.position.copy(lightPosition(settings.keyAngle + 180, 35, 5));
     previewShadow.target.updateMatrixWorld();
     floor.visible = settings.floorVisible;
     floorMaterial.color.set(settings.floorColor);
@@ -768,9 +787,7 @@ export function prepareStudioScene(
       groundCenter.z,
     );
     contactShadow.visible = rasterShadows && settings.floorVisible;
-    backdropMaterial.color.set(settings.backgroundColor);
-    backdropMaterial.emissive.set(settings.backgroundColor);
-    scene.environmentIntensity = settings.ambientIntensity * 4;
+    scene.environmentIntensity = settings.ambientIntensity;
     scene.background = new THREE.Color(settings.backgroundColor);
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = settings.fov;
@@ -789,7 +806,6 @@ export function prepareStudioScene(
       key.removeFromParent();
       fill.removeFromParent();
       floor.removeFromParent();
-      backdrop.removeFromParent();
       contactShadow.removeFromParent();
       previewShadow.removeFromParent();
       shadowTarget.removeFromParent();
@@ -797,8 +813,6 @@ export function prepareStudioScene(
       fill.dispose();
       floorGeometry.dispose();
       floorMaterial.dispose();
-      backdropGeometry.dispose();
-      backdropMaterial.dispose();
       contactShadowGeometries.forEach((geometry) => geometry.dispose());
       contactShadowMaterials.forEach((material) => material.dispose());
       previewShadow.dispose();

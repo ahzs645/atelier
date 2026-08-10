@@ -243,6 +243,16 @@ describe('prepareStudioScene', () => {
     expect((scene.background as THREE.Color).getHexString()).toBe('112233');
     expect(key.intensity).toBe(6);
     expect((studio.camera as THREE.PerspectiveCamera).fov).toBe(25);
+    const modelRadius = Math.sqrt(3) / 2;
+    const expectedDistance = modelRadius * 1.05
+      / Math.sin(THREE.MathUtils.degToRad(25) / 2);
+    expect(studio.camera.position.distanceTo(studio.target)).toBeCloseTo(
+      expectedDistance,
+      5,
+    );
+    floor.geometry.computeBoundingBox();
+    expect(floor.geometry.boundingBox?.max.y).toBeGreaterThan(modelRadius * 30);
+    expect(floor.geometry.boundingBox?.min.z).toBeLessThan(-modelRadius * 20);
 
     studio.update({ floorVisible: true, keyIntensity: 2 });
     expect(floor.visible).toBe(true);
