@@ -83,6 +83,17 @@ right deployment model, publish to a registry and pin real semver so apps upgrad
 **Stage C — public (optional).** Only if the engine gets a third consumer. The `@atelier`
 npm scope is unclaimed as of writing but should be verified before it matters.
 
+> **Update 2026-08-17: the third consumer exists.** LeatherCad (React leathercraft CAD)
+> adopted the Stage A setup — pnpm, `link:` dependencies, sibling-checkout CI, Vite
+> `dedupe`/`optimizeDeps` accommodations — and consumes `@atelier/geometry` in production
+> code paths; see LeatherCad's `docs/ATELIER.md`. Notable engine consequences:
+> LeatherCad's document frame is **Y-down**, which is supported without a conversion
+> boundary because the geometry helpers are Y-flip equivariant — that contract is now
+> pinned by `packages/geometry/src/yAxisConvention.test.ts` and must not regress. Its
+> compiler runs `erasableSyntaxOnly`, so engine source must avoid non-erasable TS syntax
+> (constructor parameter properties were removed from `viewport.ts` for this). Stage C's
+> npm-scope question is now live rather than hypothetical.
+
 ---
 
 ## 3. Phases

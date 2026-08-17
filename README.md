@@ -6,9 +6,9 @@ simulation-host, and framework-binding layers while leaving each application's d
 and UI app-owned.
 
 > **Status: implemented and in use.** All eight packages are implemented and covered by the
-> workspace checks. PackCAD (React packaging CAD) and Seamer Studio (Svelte sewing-pattern CAD)
-> consume Atelier through local `link:` dependencies. The original `packager` and `seamer`
-> repositories remain untouched
+> workspace checks. PackCAD (React packaging CAD), Seamer Studio (Svelte sewing-pattern CAD),
+> and LeatherCad (React leathercraft CAD) consume Atelier through local `link:` dependencies.
+> The original `packager` and `seamer` repositories remain untouched
 > reference implementations; see [`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 ## Packages
