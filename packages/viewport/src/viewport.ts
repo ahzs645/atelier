@@ -26,8 +26,14 @@ export interface ViewportOptions {
 export class RenderLeaseCounter {
   private count = 0;
   private disposed = false;
+  private readonly onFirstAcquire: () => void;
 
-  constructor(private readonly onFirstAcquire: () => void = () => {}) {}
+  // Explicit field assignment rather than a constructor parameter property:
+  // the packages are consumed as TypeScript source, so a consumer compiling
+  // with `erasableSyntaxOnly` (LeatherCad) would reject the shorthand.
+  constructor(onFirstAcquire: () => void = () => {}) {
+    this.onFirstAcquire = onFirstAcquire;
+  }
 
   get size(): number {
     return this.count;
