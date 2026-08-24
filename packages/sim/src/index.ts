@@ -47,7 +47,12 @@ export type {
   XpbdSettleOptions,
   XpbdSettleResult,
 } from "./xpbdCloth";
-export { assignCreaseTargets, buildClothConstraints, creasePose } from "./xpbdMesh";
+export {
+  assignCreaseTargets,
+  buildClothConstraints,
+  creaseChainPose,
+  creasePose,
+} from "./xpbdMesh";
 export type {
   ClothConstraintOptions,
   ClothConstraintSet,

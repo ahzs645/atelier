@@ -9,7 +9,12 @@ import {
   type XpbdClothState,
   type XpbdClothStepOptions,
 } from "./xpbdCloth";
-import { buildClothConstraints, creasePose, type CreaseFold } from "./xpbdMesh";
+import {
+  buildClothConstraints,
+  creaseChainPose,
+  creasePose,
+  type CreaseFold,
+} from "./xpbdMesh";
 import { createTriangleCollider, type TriangleCollisionParams } from "./xpbdCollision";
 
 /** Regular grid strip: rest xy in [0,length]×[0,width], embedded as (x,0,y). */
@@ -272,6 +277,45 @@ describe("xpbd cloth core", () => {
       }
     }
     expect(checked).toBeGreaterThan(5);
+  });
+
+  it("composes a chain of creases like nested fold pivots", () => {
+    const foldUp: CreaseFold = {
+      start: { x: 20, y: 20 },
+      end: { x: 20, y: 0 },
+      angleRad: Math.PI / 2,
+      zoneWidth: 0.02,
+    };
+    const foldBack: CreaseFold = {
+      start: { x: 40, y: 20 },
+      end: { x: 40, y: 0 },
+      angleRad: -Math.PI / 2,
+      zoneWidth: 0.02,
+    };
+
+    // One fold alone: the chain is exactly the single-crease pose.
+    const single = creasePose(foldUp);
+    const chainOfOne = creaseChainPose([foldUp]);
+    for (const [x, y] of [[5, 3], [19, 10], [20.005, 7], [30, 0], [55, 20]]) {
+      const a = single(x, y);
+      const b = chainOfOne(x, y);
+      expect(b[0]).toBeCloseTo(a[0], 6);
+      expect(b[1]).toBeCloseTo(a[1], 6);
+      expect(b[2]).toBeCloseTo(a[2], 6);
+    }
+
+    // Up then back: a Z. The first fold stands x > 20 vertical; the second,
+    // turning the opposite way in the frame the first left, brings x > 40
+    // horizontal again at the first segment's height.
+    const chain = creaseChainPose([foldUp, foldBack]);
+    const kneeHeight = chain(40, 10)[1];
+    expect(kneeHeight).toBeCloseTo(20, 0);
+    const a = chain(45, 10);
+    const b = chain(55, 10);
+    expect(a[1]).toBeCloseTo(kneeHeight, 1);
+    expect(b[1]).toBeCloseTo(kneeHeight, 1);
+    // The last segment keeps its rest length.
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])).toBeCloseTo(10, 3);
   });
 
   it("steps without moving pinned particles", () => {

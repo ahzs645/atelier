@@ -211,6 +211,72 @@ export function creasePose(
 }
 
 /**
+ * Compose several creases into one pose, the way nested fold pivots compose:
+ * `folds[0]` is the outermost hinge, and each later fold turns in the frame
+ * the earlier ones left it in.
+ *
+ * A point is carried by fold k when it sits past the start of k's bend zone
+ * (on the swinging, left side); the fold then applies the local rigid motion
+ * of its own single-crease pose at that point — the rotation about the crease
+ * by the swept fraction of the fold angle, anchored so the flat embedding
+ * lands exactly on the arc. Applied innermost-first, a displacement produced
+ * by an inner fold is rotated along by every outer fold, which is what a
+ * pivot chain does to nested geometry.
+ */
+export function creaseChainPose(
+  folds: readonly CreaseFold[],
+): (x: number, y: number) => [number, number, number] {
+  const lines = folds.map((fold) => {
+    const dx = fold.end.x - fold.start.x;
+    const dy = fold.end.y - fold.start.y;
+    const length = Math.hypot(dx, dy);
+    return {
+      fold,
+      pose: creasePose(fold),
+      dirX: length > 0 ? dx / length : 0,
+      dirY: length > 0 ? dy / length : 0,
+      valid: length > 0 && fold.zoneWidth > 0 && fold.angleRad !== 0,
+    };
+  });
+
+  return (x, y) => {
+    let qx = x;
+    let qy = 0;
+    let qz = y;
+    for (let k = lines.length - 1; k >= 0; k -= 1) {
+      const line = lines[k];
+      if (!line.valid) continue;
+      const across =
+        line.dirX * (y - line.fold.start.y) - line.dirY * (x - line.fold.start.x);
+      const half = line.fold.zoneWidth / 2;
+      if (across <= -half) continue;
+      const swept =
+        Math.min(1, (across + half) / line.fold.zoneWidth) * line.fold.angleRad;
+      // The crease direction embedded, and the rotation angle that carries
+      // the flat tangent onto the arc tangent (see creasePose): the in-plane
+      // left normal must rotate toward +y, and axis × left = −ŷ, so the
+      // rotation about the axis is by −swept.
+      const ax = line.dirX;
+      const az = line.dirY;
+      const angle = -swept;
+      const [px, py, pz] = line.pose(x, y);
+      // Rotate (q − embed) about the axis k̂ = (ax, 0, az) by Rodrigues, then
+      // land it on the posed point.
+      const vx = qx - x;
+      const vy = qy;
+      const vz = qz - y;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const dot = ax * vx + az * vz;
+      qx = px + vx * cos + -az * vy * sin + ax * dot * (1 - cos);
+      qy = py + vy * cos + (az * vx - ax * vz) * sin;
+      qz = pz + vz * cos + ax * vy * sin + az * dot * (1 - cos);
+    }
+    return [qx, qy, qz];
+  };
+}
+
+/**
  * Give each bend hinge the target dihedral it has on the creases' posed
  * surface.
  *
