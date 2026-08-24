@@ -27,6 +27,38 @@ export {
   createWorkerSteadySolverPlugin,
   serveSteadySolverPlugin,
 } from "./worker";
+export {
+  createAnchorConstraint,
+  createBendConstraint,
+  createClothState,
+  createDistanceConstraint,
+  dihedralAngle,
+  settleXpbdCloth,
+  stepXpbdCloth,
+} from "./xpbdCloth";
+export type {
+  XpbdAnchorConstraint,
+  XpbdBendConstraint,
+  XpbdClothConstraint,
+  XpbdClothState,
+  XpbdClothStepOptions,
+  XpbdCollider,
+  XpbdDistanceConstraint,
+  XpbdSettleOptions,
+  XpbdSettleResult,
+} from "./xpbdCloth";
+export { assignCreaseTargets, buildClothConstraints, creasePose } from "./xpbdMesh";
+export type {
+  ClothConstraintOptions,
+  ClothConstraintSet,
+  ClothMeshInput,
+  CreaseFold,
+} from "./xpbdMesh";
+export { createTriangleCollider } from "./xpbdCollision";
+export type {
+  TriangleCollisionConfig,
+  TriangleCollisionParams,
+} from "./xpbdCollision";
 export type {
   ServeSteadySolverOptions,
   SolveWorker,
