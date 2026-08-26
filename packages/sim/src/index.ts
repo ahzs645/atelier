@@ -24,6 +24,19 @@ export type {
   SteadySolverSession,
 } from "./steady";
 export {
+  garmentParticleCount,
+  validatePreparedGarment,
+} from "./garment";
+export type {
+  GarmentCollider,
+  GarmentConstraint,
+  GarmentConstraintRange,
+  GarmentParticles,
+  GarmentPiece,
+  GarmentSolverState,
+  PreparedGarment,
+} from "./garment";
+export {
   createWorkerSteadySolverPlugin,
   serveSteadySolverPlugin,
 } from "./worker";
