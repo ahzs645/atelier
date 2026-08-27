@@ -9,10 +9,21 @@
  * pinned particles (inverse mass 0) in the same arrays. Contacts still read
  * those particles' positions; they simply never move.
  *
- * The rest-space filter is what keeps a cloth from colliding with its own
- * immediate neighbourhood: a triangle is skipped when any of its vertices sits
- * within `restMinDistance` of the particle in rest space. Bodies that should
- * always collide (obstacles) get rest positions far from the cloth's.
+ * Two filters keep a cloth from colliding with itself where it must not.
+ *
+ * The topological one is exact and always on: a particle never collides with a
+ * triangle in its own closed one-ring — the triangles it is a corner of, and
+ * every triangle holding a vertex it shares an edge with. Without it the
+ * collider will hold the two ends of one mesh edge a thickness apart, which
+ * silently stretches any mesh cut finer than the surface is thick. Adjacency
+ * comes from the triangle list, so a separate body's triangles — an obstacle,
+ * another island — share no vertices and go on colliding normally.
+ *
+ * The rest-space one is a tunable extra: a triangle is skipped when any of its
+ * vertices sits within `restMinDistance` of the particle in rest space, which
+ * widens the exclusion past the one-ring for cloth that would otherwise chatter
+ * against its own neighbourhood. Bodies that should always collide (obstacles)
+ * get rest positions far from the cloth's.
  */
 
 import type { XpbdClothState, XpbdCollider } from "./xpbdCloth";
@@ -142,6 +153,81 @@ function closestPointOnTriangle(
   out[2] = p0z + s * e0z + t * e1z;
 }
 
+interface OneRings {
+  /** CSR offsets into `vertices`, one entry per vertex plus a terminator. */
+  start: Int32Array;
+  /** Closed one-ring per vertex: itself, and every vertex it shares a triangle with. */
+  vertices: Int32Array;
+  vertexCount: number;
+}
+
+/**
+ * Closed one-rings for every vertex the triangle list mentions, built once.
+ *
+ * Two linear passes over the incidence lists — count, then fill — so the
+ * storage is exact: sum of ring sizes, about seven vertices each on a
+ * triangulated surface. `seen` stamps a vertex with the ring being built so a
+ * shared vertex is counted once without a nested search.
+ */
+function buildOneRings(triangles: Uint32Array): OneRings {
+  const triangleCount = Math.floor(triangles.length / 3);
+  let vertexCount = 0;
+  for (let i = 0; i < triangleCount * 3; i += 1) {
+    if (triangles[i] + 1 > vertexCount) vertexCount = triangles[i] + 1;
+  }
+  if (vertexCount === 0) {
+    return { start: new Int32Array(1), vertices: new Int32Array(0), vertexCount: 0 };
+  }
+
+  // Incident triangles per vertex, CSR.
+  const incidentStart = new Int32Array(vertexCount + 1);
+  for (let i = 0; i < triangleCount * 3; i += 1) incidentStart[triangles[i] + 1] += 1;
+  for (let v = 0; v < vertexCount; v += 1) incidentStart[v + 1] += incidentStart[v];
+  const incident = new Int32Array(triangleCount * 3);
+  const cursor = Int32Array.from(incidentStart.subarray(0, vertexCount));
+  for (let t = 0; t < triangleCount; t += 1) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const v = triangles[t * 3 + corner];
+      incident[cursor[v]] = t;
+      cursor[v] += 1;
+    }
+  }
+
+  const seen = new Int32Array(vertexCount).fill(-1);
+  const start = new Int32Array(vertexCount + 1);
+  for (let v = 0; v < vertexCount; v += 1) {
+    let size = 0;
+    for (let slot = incidentStart[v]; slot < incidentStart[v + 1]; slot += 1) {
+      const t = incident[slot];
+      for (let corner = 0; corner < 3; corner += 1) {
+        const w = triangles[t * 3 + corner];
+        if (seen[w] === v) continue;
+        seen[w] = v;
+        size += 1;
+      }
+    }
+    start[v + 1] = start[v] + size;
+  }
+
+  seen.fill(-1);
+  const vertices = new Int32Array(start[vertexCount]);
+  for (let v = 0; v < vertexCount; v += 1) {
+    let write = start[v];
+    for (let slot = incidentStart[v]; slot < incidentStart[v + 1]; slot += 1) {
+      const t = incident[slot];
+      for (let corner = 0; corner < 3; corner += 1) {
+        const w = triangles[t * 3 + corner];
+        if (seen[w] === v) continue;
+        seen[w] = v;
+        vertices[write] = w;
+        write += 1;
+      }
+    }
+  }
+
+  return { start, vertices, vertexCount };
+}
+
 export function createTriangleCollider(params: TriangleCollisionParams): XpbdCollider {
   const triangles = Uint32Array.from(params.triangles as ArrayLike<number>);
   const triangleCount = Math.floor(triangles.length / 3);
@@ -184,6 +270,13 @@ export function createTriangleCollider(params: TriangleCollisionParams): XpbdCol
   let nearTriangles = new Int32Array(0);
   let corrections = new Float32Array(0);
   const closest = new Float64Array(3);
+
+  // Topology, built once from the triangle list: `neighbourStamp[v] === p + 1`
+  // means v is in particle p's closed one-ring. Each particle rewrites its own
+  // ring before gathering, and only particle p ever writes p + 1, so the marks
+  // never need clearing and a candidate is rejected in three reads.
+  const oneRings = buildOneRings(triangles);
+  const neighbourStamp = new Int32Array(oneRings.vertexCount);
 
   const cellIndex = (coord: number): number => Math.floor(coord / cellSpacing);
   const restFar = (particle: number, vertex: number): boolean => {
@@ -263,6 +356,15 @@ export function createTriangleCollider(params: TriangleCollisionParams): XpbdCol
 
     for (let index = 0; index < count; index += 1) {
       if (skipParticle?.(index)) continue;
+      if (index < oneRings.vertexCount) {
+        for (
+          let slot = oneRings.start[index];
+          slot < oneRings.start[index + 1];
+          slot += 1
+        ) {
+          neighbourStamp[oneRings.vertices[slot]] = index + 1;
+        }
+      }
       const px = positions[index * 3];
       const py = positions[index * 3 + 1];
       const pz = positions[index * 3 + 2];
@@ -292,7 +394,18 @@ export function createTriangleCollider(params: TriangleCollisionParams): XpbdCol
               const v0 = triangles[tri * 3];
               const v1 = triangles[tri * 3 + 1];
               const v2 = triangles[tri * 3 + 2];
-              if (v0 === index || v1 === index || v2 === index) continue;
+              // Topological neighbours: the triangles this particle is a
+              // corner of, and every triangle sharing a vertex with one of
+              // them. Holding those a thickness apart would fight the
+              // distance constraints that own the same edges.
+              const stamp = index + 1;
+              if (
+                neighbourStamp[v0] === stamp ||
+                neighbourStamp[v1] === stamp ||
+                neighbourStamp[v2] === stamp
+              ) {
+                continue;
+              }
               // Different cells can alias to one hash bucket, so the same
               // triangle can come around again — a duplicate contact would
               // double its correction.
