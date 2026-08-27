@@ -16,7 +16,7 @@ import {
   type XpbdClothStepOptions,
 } from "./xpbdCloth";
 import { buildClothConstraints } from "./xpbdMesh";
-import { createTriangleCollider } from "./xpbdCollision";
+import { closestPointOnTriangle, createTriangleCollider } from "./xpbdCollision";
 
 const QUASI_STATIC: XpbdClothStepOptions = {
   dt: 1 / 60,
@@ -161,4 +161,65 @@ describe("triangle collider topology", () => {
     expect(state.positions[4 * 3 + 1]).toBe(0);
     expect(worstStretch(state, sheetRest, edges)).toBeLessThan(1e-3);
   });
+});
+
+/**
+ * Every branch of the region walk, against a reference that cannot share its
+ * mistakes.
+ *
+ * The walk has seven branches and only one of them — the interior — is
+ * reachable by the queries a settle happens to generate, which is how two
+ * defects survived a port. So aim a query at each region and check the answer
+ * against a brute-force minimisation over the triangle, which knows nothing
+ * about Eberly.
+ */
+describe("closestPointOnTriangle", () => {
+  const TRIANGLE = [0, 0, 0, 4, 0, 0, 0, 3, 0] as const;
+
+  /** The closest point, found by dense sampling of the barycentric domain. */
+  function bruteForce(point: readonly number[]) {
+    let best = Infinity;
+    let bestAt = [0, 0, 0];
+    const steps = 600;
+    for (let i = 0; i <= steps; i += 1) {
+      for (let j = 0; j <= steps - i; j += 1) {
+        const s = i / steps;
+        const t = j / steps;
+        const x = TRIANGLE[0] + s * (TRIANGLE[3] - TRIANGLE[0]) + t * (TRIANGLE[6] - TRIANGLE[0]);
+        const y = TRIANGLE[1] + s * (TRIANGLE[4] - TRIANGLE[1]) + t * (TRIANGLE[7] - TRIANGLE[1]);
+        const z = TRIANGLE[2] + s * (TRIANGLE[5] - TRIANGLE[2]) + t * (TRIANGLE[8] - TRIANGLE[2]);
+        const d = (x - point[0]) ** 2 + (y - point[1]) ** 2 + (z - point[2]) ** 2;
+        if (d < best) {
+          best = d;
+          bestAt = [x, y, z];
+        }
+      }
+    }
+    return bestAt;
+  }
+
+  const cases: Array<[string, number[]]> = [
+    ["interior", [1, 1, 2]],
+    ["over vertex p0", [-2, -2, 1]],
+    ["over vertex p1", [7, -2, 1]],
+    ["over vertex p2", [-2, 6, 1]],
+    ["over edge p0-p1", [2, -3, 1]],
+    ["over edge p0-p2", [-3, 1.5, 1]],
+    ["over edge p1-p2", [4, 3, 1]],
+    // Region 6: past p1, below the t = 0 edge. Collapsing here must minimise
+    // along edge0, not edge1 — the branch that returned p0, the far vertex of
+    // the wrong edge, in the kernel this was ported from.
+    ["region 6, past p1 below the base", [9, -1, 0]],
+    ["region 6, far past p1", [40, -0.5, 0]],
+  ];
+
+  for (const [name, query] of cases) {
+    it(`lands on the triangle for a query ${name}`, () => {
+      const out = new Float64Array(3);
+      closestPointOnTriangle(...(TRIANGLE as unknown as [number, number, number, number, number, number, number, number, number]), query[0], query[1], query[2], out);
+      const expected = bruteForce(query);
+      const off = Math.hypot(out[0] - expected[0], out[1] - expected[1], out[2] - expected[2]);
+      expect(off).toBeLessThan(0.02);
+    });
+  }
 });

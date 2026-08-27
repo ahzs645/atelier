@@ -84,8 +84,11 @@ function hashCoords(xi: number, yi: number, zi: number, size: number): number {
  * needs it. Seamer's WGSL port flipped it to `point − p0` while keeping the
  * rest, which negates the interior solve and sends centre-of-face queries to
  * a vertex; this port restores the original.
+ *
+ * Exported for tests only: every branch of a region walk needs a query aimed
+ * at it, and driving them through a settle cannot do that.
  */
-function closestPointOnTriangle(
+export function closestPointOnTriangle(
   p0x: number, p0y: number, p0z: number,
   p1x: number, p1y: number, p1z: number,
   p2x: number, p2y: number, p2z: number,
@@ -141,7 +144,14 @@ function closestPointOnTriangle(
       s = clamp01((c + e - b - d) / (a - 2 * b + c));
       t = 1 - s;
     } else {
-      s = clamp01(-e / c);
+      // Collapsing onto the t = 0 edge, which runs along edge0, so the
+      // minimiser is edge0's: -d/a. Eberly's region 6. The kernel this was
+      // ported from uses -e/c here, edge1's minimiser, in both of its copies
+      // — for a query past p1 that clamps to 0 and returns p0, the far vertex
+      // of the wrong edge. It is masked upstream by the negated v0 that makes
+      // this region all but unreachable, which is why the port inherited it
+      // while fixing the negation.
+      s = clamp01(-d / a);
       t = 0;
     }
   } else {
