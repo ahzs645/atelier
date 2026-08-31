@@ -80,4 +80,59 @@ describe("prepared garment", () => {
     };
     expect(validatePreparedGarment(broken)[0]).toMatch(/past the 4 there are/);
   });
+
+  it("refuses a constraint whose particle is not a whole number", () => {
+    // Both of these are in range as far as an ordering test can tell — NaN
+    // because every comparison against it is false, 1.5 because it sits
+    // between two particles that do exist — and both index the position array
+    // to undefined once multiplied by the stride.
+    const garment = square();
+    for (const a of [Number.NaN, 1.5]) {
+      const broken: PreparedGarment = { ...garment, constraints: [{ a, b: 1, rest: 1 }] };
+      expect(validatePreparedGarment(broken)[0]).toMatch(/not both whole numbers/);
+    }
+  });
+
+  it("refuses a piece that starts before the first particle", () => {
+    const garment = square();
+    const broken: PreparedGarment = {
+      ...garment,
+      pieces: [{ name: "front", particleStart: -1, particleCount: 2 }],
+    };
+    expect(validatePreparedGarment(broken)[0]).toMatch(/not a run of them/);
+  });
+
+  it("refuses a collider that is not a whole number of vertices", () => {
+    const garment = square();
+    const broken: PreparedGarment = {
+      ...garment,
+      collider: { positions: new Float32Array(7), indices: new Uint32Array([0, 1, 2]) },
+    };
+    expect(validatePreparedGarment(broken)[0]).toMatch(/whole number of vertices/);
+  });
+
+  it("refuses a collider whose indices do not make whole triangles", () => {
+    const garment = square();
+    const broken: PreparedGarment = {
+      ...garment,
+      collider: { positions: new Float32Array(9), indices: new Uint32Array([0, 1, 2, 0]) },
+    };
+    expect(validatePreparedGarment(broken)[0]).toMatch(/whole number of triangles/);
+  });
+
+  it("refuses a collider triangle that names a vertex before the first", () => {
+    // A garment that crossed an application boundary is not always still
+    // holding the typed arrays its type claims: a JSON round-trip leaves plain
+    // arrays behind, and those can carry the negative index a Uint32Array
+    // would have wrapped into a large positive one.
+    const garment = square();
+    const broken: PreparedGarment = {
+      ...garment,
+      collider: {
+        positions: new Float32Array(9),
+        indices: [0, 1, -5] as unknown as Uint32Array,
+      },
+    };
+    expect(validatePreparedGarment(broken)[0]).toMatch(/outside the 3 it has/);
+  });
 });

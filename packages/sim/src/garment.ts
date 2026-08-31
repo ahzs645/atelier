@@ -90,6 +90,19 @@ export interface GarmentSolverState {
 
 const particleStride = 3;
 
+/**
+ * Whether a number names one of `count` things.
+ *
+ * A solver indexes flat arrays with these, so "in range" is not enough on its
+ * own: `positions[1.5 * 3]` is undefined and `positions[NaN * 3]` is undefined,
+ * and both read back as a particle at NaN that quietly poisons every constraint
+ * it touches. Neither comparison below catches them — every ordering test
+ * against NaN is false — so the whole-number test has to come first.
+ */
+function namesOneOf(index: number, count: number) {
+  return Number.isInteger(index) && index >= 0 && index < count;
+}
+
 /** Checks a prepared garment holds together before a solver is built from it. */
 export function validatePreparedGarment(garment: PreparedGarment): string[] {
   const problems: string[] = [];
@@ -105,7 +118,13 @@ export function validatePreparedGarment(garment: PreparedGarment): string[] {
   }
   for (let index = 0; index < garment.constraints.length; index++) {
     const constraint = garment.constraints[index]!;
-    if (constraint.a < 0 || constraint.a >= count || constraint.b < 0 || constraint.b >= count) {
+    if (!Number.isInteger(constraint.a) || !Number.isInteger(constraint.b)) {
+      problems.push(
+        `constraint ${index} joins particles ${constraint.a} and ${constraint.b}, which are not both whole numbers`,
+      );
+      break;
+    }
+    if (!namesOneOf(constraint.a, count) || !namesOneOf(constraint.b, count)) {
       problems.push(
         `constraint ${index} joins particles ${constraint.a} and ${constraint.b}, outside the ${count} there are`,
       );
@@ -117,17 +136,40 @@ export function validatePreparedGarment(garment: PreparedGarment): string[] {
     }
   }
   if (garment.collider) {
-    const vertices = Math.floor(garment.collider.positions.length / particleStride);
-    for (let index = 0; index < garment.collider.indices.length; index++) {
-      if (garment.collider.indices[index]! >= vertices) {
+    const { positions: colliderPositions, indices } = garment.collider;
+    if (colliderPositions.length % particleStride !== 0) {
+      problems.push(
+        `the collider holds ${colliderPositions.length} numbers, which is not a whole number of vertices`,
+      );
+    }
+    if (indices.length % 3 !== 0) {
+      problems.push(
+        `the collider holds ${indices.length} indices, which is not a whole number of triangles`,
+      );
+    }
+    const vertices = Math.floor(colliderPositions.length / particleStride);
+    for (let index = 0; index < indices.length; index++) {
+      const vertex = indices[index]!;
+      if (!namesOneOf(vertex, vertices)) {
         problems.push(
-          `the collider's triangle ${Math.floor(index / 3)} names vertex ${garment.collider.indices[index]}, outside the ${vertices} it has`,
+          `the collider's triangle ${Math.floor(index / 3)} names vertex ${vertex}, outside the ${vertices} it has`,
         );
         break;
       }
     }
   }
   for (const piece of garment.pieces ?? []) {
+    if (
+      !Number.isInteger(piece.particleStart) ||
+      !Number.isInteger(piece.particleCount) ||
+      piece.particleStart < 0 ||
+      piece.particleCount < 0
+    ) {
+      problems.push(
+        `piece "${piece.name}" claims ${piece.particleCount} particles from ${piece.particleStart}, which is not a run of them`,
+      );
+      break;
+    }
     if (piece.particleStart + piece.particleCount > count) {
       problems.push(
         `piece "${piece.name}" claims particles up to ${piece.particleStart + piece.particleCount}, past the ${count} there are`,
