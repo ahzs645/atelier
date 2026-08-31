@@ -24,11 +24,14 @@ for the evidence that motivated it.
 | Viewport | three.js runtime: camera rig, controls, lighting/IBL, post FX, picking, gizmos, overlays, disposal |
 | Still rendering | progressive path tracing, cancellation/progress, PNG encoding, local denoising |
 | I/O | SVG, DXF, HPGL, PDF (tiled), PNG, glTF, OBJ, STL |
-| Solver host | lifecycle + WebGPU device management for pluggable solvers |
+| Solver host | lifecycle + WebGPU device management for pluggable solvers, CPU XPBD cloth kernels |
 
 **Out of scope — stays in the apps:**
 
-- Fold solvers (packager), XPBD cloth + WGSL (seamer)
+- Fold solvers (packager), the WGSL cloth engine (seamer), and every app's *domain* solver.
+  The generic CPU XPBD kernels those solvers share (distance/bend constraints, triangle
+  self-collision, quasi-static settle) moved into `@atelier/sim` once a third consumer
+  (LeatherCad's fold drape) needed the same shape — see §4.5.
 - Parametric avatar, body measurements, skinning (seamer)
 - Material *catalogs* (corrugated flutes, fabric presets) — the *material spec type* is shared, the data is not
 - All UI chrome, panels, toolbars, modals, routing
@@ -973,7 +976,18 @@ polylines are cutting contours in `.cut`; open polylines remain available in HPG
 
 ### 4.5 `@atelier/sim`
 
-Thin. Solvers are app-owned plugins (§1); this package only hosts them.
+Thin. Solvers are app-owned plugins (§1); this package hosts them, and ships the
+shared CPU XPBD cloth kernels a domain solver builds on: `createClothState`,
+distance / dihedral-bend / soft-anchor constraints (`buildClothConstraints`
+extracts them from a triangle mesh with flat rest positions),
+`createTriangleCollider` (counting-sort spatial hash over triangle AABBs with
+edge + face contacts, a CPU port of seamer's GPU self-collision with its
+closest-point sign bug fixed), `stepXpbdCloth` / `settleXpbdCloth`, and
+`creasePose` / `assignCreaseTargets` for developable fold poses. Rigid
+obstacles are pinned particles with triangles in the same arrays; the intended
+drive for a quasi-static fold is soft anchors swept along a pose
+(`XpbdSettleOptions.onStep`), with contact answered per iteration
+(`colliderEveryIteration`).
 
 ```ts
 export interface SolverHandle<TState> {

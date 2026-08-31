@@ -20,7 +20,7 @@ and UI app-owned.
 | `@atelier/viewport` | Imperative three.js viewport with cameras, lighting, post-processing, picking, overlays, gizmos, and resource ownership. |
 | `@atelier/render` | Progressive path-traced still rendering with cancellation, progress, PNG output, and a locally bundled denoiser. |
 | `@atelier/io` | Neutral `Drawing` import/export, PDF and cut-file output, plus browser and three.js entry points. |
-| `@atelier/sim` | Solver lifecycle and shared WebGPU device acquisition for app-owned solvers. |
+| `@atelier/sim` | Solver lifecycle, shared WebGPU device acquisition, and CPU XPBD cloth kernels (distance, dihedral bending, triangle collision) for app-owned solvers. |
 | `@atelier/react` | React hooks and a `ViewportCanvas` binding. |
 | `@atelier/svelte` | Svelte 5 editor state and viewport action bindings. |
 
