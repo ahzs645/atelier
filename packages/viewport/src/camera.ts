@@ -149,6 +149,9 @@ export class CameraRig {
   private flyFrame = 0;
   private flyResolve: (() => void) | null = null;
   private disposed = false;
+  private lastControlsUpdateMs: number | null = null;
+  private controlsMotionPending = false;
+  private controlsInteracting = false;
   readonly [cameraRigInternal]: CameraRigInternal = {
     update: () => this.updateControls(),
     resize: (width, height) => this.resizeProjection(width, height),
@@ -187,6 +190,8 @@ export class CameraRig {
     this.controls.minDistance = 0.001;
     this.controls.maxDistance = 1_000;
     this.controls.addEventListener('change', this.handleControlsChange);
+    this.controls.addEventListener('start', this.handleControlsStart);
+    this.controls.addEventListener('end', this.handleControlsEnd);
     this.applyInputMap();
     if (this.element) this.inputDisposer = this.installInputWorkaround(this.element);
     if (this.projection === '2d') {
@@ -322,6 +327,10 @@ export class CameraRig {
     ms = 700,
   ): Promise<void> {
     this.cancelFly();
+    // Explicit camera animation takes ownership from a previous user orbit.
+    const up = this._camera.up.clone();
+    this.setState(this.getState());
+    this._camera.up.copy(up);
     const view = this.element?.ownerDocument.defaultView;
     if (!view || ms <= 0) {
       this._camera.position.copy(position);
@@ -397,6 +406,11 @@ export class CameraRig {
 
   setState(state: CameraState): void {
     this.cancelFly();
+    // A restored checkpoint must not inherit inertia from the preceding orbit.
+    // Consume OrbitControls' private residuals before applying the requested pose.
+    const damping = this.controls.enableDamping;
+    this.controls.enableDamping = false;
+    this.controls.update();
     this.setKind(state.kind);
     this.fov = THREE.MathUtils.clamp(state.fov, 10, 120);
     if (this._camera instanceof THREE.PerspectiveCamera) this._camera.fov = this.fov;
@@ -406,11 +420,49 @@ export class CameraRig {
     this._camera.zoom = Math.max(Number.EPSILON, state.zoom);
     this._camera.updateProjectionMatrix();
     this.controls.update();
+    this.controls.enableDamping = damping;
+    this.controlsMotionPending = false;
+    this.lastControlsUpdateMs = this.controlsNow();
     this.emitChange();
   }
 
   private updateControls(): boolean {
-    return this.controls.update();
+    const previousPosition = this._camera.position.clone();
+    const previousQuaternion = this._camera.quaternion.clone();
+    const previousZoom = this._camera.zoom;
+    const now = this.controlsNow();
+    const elapsedSeconds = this.lastControlsUpdateMs === null
+      ? 1 / 60 : Math.max(0, (now - this.lastControlsUpdateMs) / 1_000);
+    this.lastControlsUpdateMs = now;
+    const baseDamping = this.controls.dampingFactor;
+    // OrbitControls' damping is per update. Match its 60 Hz behaviour in elapsed
+    // time so a slow render does not turn a short orbit into minutes of movement.
+    if (this.controls.enableDamping) {
+      this.controls.dampingFactor = 1 - Math.pow(1 - baseDamping, elapsedSeconds * 60);
+    }
+    try {
+      const changed = this.controls.update(elapsedSeconds);
+      if (!changed && this.controlsMotionPending && this.controls.enableDamping
+        && !this.controlsInteracting && !this.controls.autoRotate) {
+        // OrbitControls stops reporting changes below its visual epsilon, although
+        // it still changes the real pose. Finish that tiny remaining camera inertia
+        // once and notify subscribers of the exact final checkpoint before idle.
+        this.controls.enableDamping = false;
+        try { this.controls.update(elapsedSeconds); }
+        finally { this.controls.enableDamping = true; }
+        if (!this._camera.position.equals(previousPosition)
+          || !this._camera.quaternion.equals(previousQuaternion)
+          || this._camera.zoom !== previousZoom) this.controls.dispatchEvent({ type: 'change' });
+        this.controlsMotionPending = false;
+      }
+      return changed;
+    } finally {
+      this.controls.dampingFactor = baseDamping;
+    }
+  }
+
+  private controlsNow(): number {
+    return (this.element?.ownerDocument.defaultView?.performance ?? performance).now();
   }
 
   private resizeProjection(width: number, height: number): void {
@@ -446,6 +498,8 @@ export class CameraRig {
     this.cancelFly();
     this.inputDisposer();
     this.controls.removeEventListener('change', this.handleControlsChange);
+    this.controls.removeEventListener('start', this.handleControlsStart);
+    this.controls.removeEventListener('end', this.handleControlsEnd);
     if (this.element) this.controls.dispose();
     this.listeners.clear();
   }
@@ -476,7 +530,20 @@ export class CameraRig {
   }
 
   private readonly handleControlsChange = (): void => {
+    this.controlsMotionPending = true;
     this.emitChange();
+  };
+
+  private readonly handleControlsStart = (): void => {
+    // An idle viewport has no intervening frames. Its idle time is not damping time.
+    this.lastControlsUpdateMs = this.controlsNow();
+    this.controlsInteracting = true;
+    this.controlsMotionPending = true;
+  };
+
+  private readonly handleControlsEnd = (): void => {
+    this.controlsInteracting = false;
+    this.invalidate();
   };
 
   private cancelFly(): void {

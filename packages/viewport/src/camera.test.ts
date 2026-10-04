@@ -70,6 +70,90 @@ describe('CameraRig pure state and framing', () => {
 });
 
 describe('CameraRig views and lifecycle', () => {
+  it('settles a real orbit by elapsed time at both 60 Hz and one frame per second', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const simulate = (frameMs: number): CameraState => {
+      now = 0;
+      const rig = new CameraRig();
+      rig.controls.dispatchEvent({ type: 'start' });
+      (rig.controls as unknown as { _rotateLeft(angle: number): void })._rotateLeft(.4);
+      rig.controls.dispatchEvent({ type: 'end' });
+      for (let frame = 1; frame <= Math.round(3_000 / frameMs); frame++) {
+        now = frame * frameMs;
+        rig[cameraRigInternal].update();
+        expect(rig.controls.dampingFactor).toBe(.1);
+      }
+      const state = rig.getState(); rig.dispose(); return state;
+    };
+    const fast = simulate(1_000 / 60);
+    const slow = simulate(1_000);
+    slow.position.forEach((v, i) => expect(v).toBeCloseTo(fast.position[i]!, 12));
+  });
+
+  it('publishes the real final subepsilon orbit pose once before demand rendering stops', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const rig = new CameraRig();
+    const checkpoints: CameraState[] = [];
+    rig.onChange(state => checkpoints.push(state));
+    rig.controls.dispatchEvent({ type: 'start' });
+    (rig.controls as unknown as { _rotateLeft(angle: number): void })._rotateLeft(.4);
+    rig.controls.update(); rig.controls.dispatchEvent({ type: 'end' });
+    let moving = true;
+    for (let frame = 1; frame < 200 && moving; frame++) {
+      now = frame * (1_000 / 60); moving = rig[cameraRigInternal].update();
+    }
+    expect(moving).toBe(false);
+    const final = rig.getState(), count = checkpoints.length;
+    expect(checkpoints.at(-1)).toEqual(final);
+    now += 4_000; expect(rig[cameraRigInternal].update()).toBe(false);
+    final.position.forEach((v, i) => expect(rig.getState().position[i]).toBeCloseTo(v, 14));
+    expect(checkpoints).toHaveLength(count); rig.dispose();
+  });
+
+  it('does not count idle time before the first pointer movement as damping', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const simulate = (idleMs: number): CameraState => {
+      now = 0;
+      const rig = new CameraRig(); rig[cameraRigInternal].update();
+      now = idleMs; rig.controls.dispatchEvent({ type: 'start' });
+      (rig.controls as unknown as { _rotateLeft(angle: number): void })._rotateLeft(.4);
+      now += 1_000 / 60; rig[cameraRigInternal].update();
+      const state = rig.getState(); rig.dispose(); return state;
+    };
+    const immediate = simulate(0), afterIdle = simulate(60_000);
+    afterIdle.position.forEach((v, i) => expect(v).toBeCloseTo(immediate.position[i]!, 12));
+  });
+
+  it('restores the exact requested checkpoint and discards old orbit inertia', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const rig = new CameraRig();
+    (rig.controls as unknown as { _rotateLeft(angle: number): void })._rotateLeft(.7);
+    rig.controls.update();
+    const requested: CameraState = { kind: 'perspective', position: [1, 2, 3],
+      target: [.1, .2, .3], zoom: 1, fov: 42 };
+    rig.setState(requested);
+    requested.position.forEach((v, i) => expect(rig.getState().position[i]).toBeCloseTo(v, 14));
+    now = 4_000; expect(rig[cameraRigInternal].update()).toBe(false);
+    requested.position.forEach((v, i) => expect(rig.getState().position[i]).toBeCloseTo(v, 14));
+    expect(rig.controls.enableDamping).toBe(true); expect(rig.controls.dampingFactor).toBe(.1);
+    rig.dispose();
+  });
+
+  it('keeps an explicit camera preset exact after a partially damped orbit', async () => {
+    const rig = new CameraRig();
+    (rig.controls as unknown as { _rotateLeft(angle: number): void })._rotateLeft(.7);
+    rig.controls.update();
+    await rig.flyToView('front', 0);
+    const preset = rig.getState();
+    for (let i = 0; i < 5; i++) rig[cameraRigInternal].update();
+    preset.position.forEach((v, i) => expect(rig.getState().position[i]).toBeCloseTo(v, 14));
+    expect(rig.controls.dampingFactor).toBe(.1); rig.dispose();
+  });
+
   it.each([
     ['front', [1, 2, 6], [0, 1, 0]],
     ['back', [1, 2, 0], [0, 1, 0]],
